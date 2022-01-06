@@ -1,0 +1,45 @@
+{
+    "manifestVersion": 1,
+    "id": "active-pull-requests",
+    "publisher": "karlingen",
+    "version": "1.0.20",
+    "name": "Active Pull Requests",
+    "description": "Azure DevOps Extension",
+    "categories": [
+        "Azure Repos"
+    ],
+    "targets": [
+        {
+            "id": "Microsoft.VisualStudio.Services"
+        }
+    ],
+    "icons": {
+        "default": "images/logo.png"
+    },
+    "content": {
+        "details": {
+            "path": "overview.md"
+        }
+    },
+    "scopes": [
+        "vso.code"
+    ],
+    "files": [
+        {
+            "path": "static",
+            "addressable": true
+        },
+        {
+            "path": "dist",
+            "addressable": true
+        },
+        {
+            "path": "images/menu-icon-light.png",
+            "addressable": true
+        },
+        {
+            "path": "images/menu-icon-dark.png",
+            "addressable": true
+        }
+    ]
+}
