@@ -2,7 +2,7 @@
     "manifestVersion": 1,
     "id": "active-pull-requests",
     "publisher": "karlingen",
-    "version": "1.0.20",
+    "version": "1.0.25",
     "name": "Active Pull Requests",
     "description": "Azure DevOps Extension",
     "categories": [
@@ -16,6 +16,21 @@
     "icons": {
         "default": "images/logo.png"
     },
+    "links": {
+        "home": {
+            "uri": "https://github.com/karlingen/ActivePullRequests"
+        },
+        "repository": {
+            "uri": "https://github.com/karlingen/ActivePullRequests"
+        },
+        "issues": {
+            "uri": "https://github.com/karlingen/ActivePullRequests/issues"
+        }
+    },
+    "repository": {
+        "type": "git",
+        "uri": "https://github.com/karlingen/ActivePullRequests"
+    },
     "content": {
         "details": {
             "path": "overview.md"
@@ -25,10 +40,6 @@
         "vso.code"
     ],
     "files": [
-        {
-            "path": "static",
-            "addressable": true
-        },
         {
             "path": "dist",
             "addressable": true

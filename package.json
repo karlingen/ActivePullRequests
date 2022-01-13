@@ -10,7 +10,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "uri": "https://github.com/karlingen/ActivePullRequests"
   },
   "scripts": {
     "clean": "rimraf ./dist",
