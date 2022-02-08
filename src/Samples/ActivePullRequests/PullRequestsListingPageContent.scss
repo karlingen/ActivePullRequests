@@ -14,3 +14,17 @@
 .white-space-normal {
     white-space: normal;
 }
+
+.white-space-nowrap {
+    white-space: nowrap;
+}
+
+.draft-pill {
+    border-color: $communication-foreground !important;
+    color: $communication-foreground;
+}
+
+.required-pill {
+    border-color: $status-error-foreground !important;
+    color: $status-error-foreground;
+}

@@ -24,3 +24,9 @@ This automatically publishes to the [Visual Studio Marketplace](https://marketpl
 # Contributing
 
 This project welcomes contributions and suggestions. Please see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+# Problems?
+
+## Blank page in development
+
+Visit https://0.0.0.0:3000 in your browser and bypass the certficate issue and then reload the extension page.

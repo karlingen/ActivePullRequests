@@ -42,6 +42,7 @@ interface IPullRequestsListingPageContentState {
     allPullRequests: GitPullRequest[];
     filteredItems: GitPullRequest[];
     loading: boolean;
+    currentUserId: string;
 }
 
 interface IStatusIndicatorData {
@@ -60,7 +61,8 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             filtering: false,
             filteredItems: [],
             allPullRequests: [],
-            loading: true
+            loading: true,
+            currentUserId: ""
         };
     }
 
@@ -96,14 +98,13 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         if (pullRequests && pullRequests.length > 0) {
             this.setState({
                 allPullRequests: pullRequests
-                // , sortedItems: pullRequests 
             })
 
             // Now that all the await calls are done, we are ready to filter by perferred repos.
             this.props.filterByPersistedRepositories();
         }
 
-        this.setState({ loading: false });
+        this.setState({ loading: false, currentUserId: currentUser.id });
     }
 
     componentWillUnmount() {
@@ -217,20 +218,57 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 tableColumn: ITableColumn<GitPullRequest>,
                 tableItem: GitPullRequest
             ): JSX.Element => {
+
+                let sourceBranchName = tableItem.sourceRefName.split('/').pop();
+                let targetBranchName = tableItem.targetRefName.split('/').pop();
+                let currentUserIsRequiredReviewer = tableItem.reviewers.some(reviewer => reviewer.isRequired && reviewer.id == this.state.currentUserId);
+
                 return (
-                    <SimpleTableCell
+                    <TwoLineTableCell
+                        className="bolt-table-cell-content-with-inline-link"
+                        key={"col-" + columnIndex}
                         columnIndex={columnIndex}
                         tableColumn={tableColumn}
-                        key={"col-" + columnIndex}
-                        contentClassName="fontSizeM font-size-m scroll-hidden">
-                        <div className="flex-row scroll-hidden rhythm-horizontal-4">
-                            {tableItem.isDraft && <Pill size={PillSize.regular} variant={PillVariant.outlined}>Draft</Pill>}
+                        line1={
+                            <div className="scroll-hidden rhythm-horizontal-4 flex-row">
+                                <Tooltip overflowOnly={true} className="flex-row">
+                                    <span className={"white-space-normal"}>{tableItem.title}</span>
+                                </Tooltip>
 
-                            <Tooltip overflowOnly={true}>
-                                <span className={"white-space-normal"}>{tableItem.title}</span>
-                            </Tooltip>
-                        </div>
-                    </SimpleTableCell>
+                                <span className="flex-row flex-center">
+                                    {tableItem.isDraft && <Pill className="draft-pill" size={PillSize.compact} variant={PillVariant.outlined}>Draft</Pill>}
+                                </span>
+                                <span className="flex-row flex-center">
+                                    {currentUserIsRequiredReviewer && <Pill className="required-pill" size={PillSize.compact} variant={PillVariant.outlined}>Required</Pill>}
+                                </span>
+                            </div>
+                        }
+                        line2={
+                            <span className="fontSize font-size secondary-text flex-row flex-center text-ellipsis">
+                                <Tooltip text={sourceBranchName + " into " + targetBranchName} overflowOnly>
+                                    <span className="text-ellipsis" style={{ flexShrink: 10 }}>
+                                        <span className="monospaced-xs bolt-table-link bolt-table-inline-link text-ellipsis">
+                                            {Icon({
+                                                className: "icon-margin",
+                                                iconName: "OpenSource",
+                                                key: "branch-name",
+                                            })}
+                                            {sourceBranchName}
+                                        </span>
+                                        <span>into</span>
+                                        <span className="monospaced-xs bolt-table-link bolt-table-inline-link text-ellipsis">
+                                            {Icon({
+                                                className: "icon-margin",
+                                                iconName: "OpenSource",
+                                                key: "branch-name",
+                                            })}
+                                            {targetBranchName}
+                                        </span>
+                                    </span>
+                                </Tooltip>
+                            </span>
+                        }
+                    />
                 );
             },
             sortProps: {
