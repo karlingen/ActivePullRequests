@@ -4,7 +4,7 @@ import * as SDK from "azure-devops-extension-sdk";
 import { Header, TitleSize } from "azure-devops-ui/Header";
 import { Page } from "azure-devops-ui/Page";
 import { showRootComponent } from "../../Common";
-import { getClient, CommonServiceIds, ILocationService, IExtensionDataService } from "azure-devops-extension-api";
+import { getClient, CommonServiceIds, ILocationService, IExtensionDataService, IProjectPageService } from "azure-devops-extension-api";
 import { HeaderCommandBarWithFilter } from "azure-devops-ui/HeaderCommandBar";
 import { GitRestClient, GitRepository } from "azure-devops-extension-api/Git";
 import { ConditionalChildren } from "azure-devops-ui/ConditionalChildren";
@@ -51,10 +51,14 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
 
         // Setup services
         const locationService = await SDK.getService<ILocationService>(CommonServiceIds.LocationService);
-
+        const projectService = await SDK.getService<IProjectPageService>(CommonServiceIds.ProjectPageService);
         const gitRestClient: GitRestClient = getClient(GitRestClient);
+
+        const currentProject = await projectService.getProject();
         const allRepositories = await (await gitRestClient.getRepositories())
-            .sort(function (a, b) { return (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0); });
+            .filter(function(repo) { return repo.project.id == currentProject?.id })
+            .sort(function (repoA, repoB) { return (repoA.name > repoB.name) ? 1 : ((repoB.name > repoA.name) ? -1 : 0); });
+
         const currentLocation = await locationService.getResourceAreaLocation(GitRestClient.RESOURCE_AREA_ID);
         this.setState({ baseUrl: currentLocation, allRepositories })
     }
