@@ -135,7 +135,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         const innerData = data.data;
                         const repository = innerData.repository;
 
-                        this._navigationService.navigate(this.getPRUrl(repository.project.name, repository.name, innerData.pullRequestId));
+                        this.navigateToPullRequest(repository.project.name, repository.name, innerData.pullRequestId);
                     }}
                 />
             </Card>
@@ -392,14 +392,16 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                     key={"col-" + columnIndex}
                     contentClassName="fontSizeM font-size-m scroll-hidden">
                     <div className="flex-row scroll-hidden">
-
-                        <Link href={this.getPRUrl(repository.project.name, repository.name, pullRequestId)}>
+                        <Link
+                            href={this.getPRUrl(repository.project.name, repository.name, pullRequestId)}
+                            onClick={(e) => {
+                                e.preventDefault()
+                                this.navigateToPullRequest(repository.project.name, repository.name, pullRequestId);
+                            }}>
                             <Tooltip overflowOnly={true}>
                                 <span>{pullRequestId}</span>
                             </Tooltip>
                         </Link>
-
-
                     </div>
                 </SimpleTableCell>
             );
@@ -483,6 +485,10 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             this.setState({ filteredItems: sortedItems });
         }
     );
+
+    private navigateToPullRequest(projectName: string, repositoryName: string, pullRequestId: number) {
+        this._navigationService.navigate(this.getPRUrl(projectName, repositoryName, pullRequestId));
+    }
 }
 
 
