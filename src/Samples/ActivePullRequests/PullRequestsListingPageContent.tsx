@@ -93,7 +93,12 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             sourceRepositoryId: "",
             status: PullRequestStatus.Active,
             targetRefName: ""
-        });
+        },
+            undefined,
+            undefined,
+            // Top should be set to '0' to retrieve all repositories. Otherwise, there will be a limit of 100 items.
+            // We should revisit this when/if this will cause performance issues in the future.
+            0);
 
         if (pullRequests && pullRequests.length > 0) {
             this.setState({
