@@ -25,6 +25,7 @@ import {
     ColumnSorting,
     SortOrder,
     sortItems,
+    TableHeaderCell,
 } from "azure-devops-ui/Table";
 import Constants from "./Constants";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
@@ -318,6 +319,22 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             id: "mergeStatus",
             name: "Merge Status",
             readonly: true,
+            headerClassName: "merge-status-header",
+            renderHeaderCell(
+                columnIndex: number,
+                tableColumn: ITableColumn<GitPullRequest>,
+                focuszoneId?: string,
+                isFirstActionableHeader?: boolean) {
+                return (
+                    <TableHeaderCell
+                        columnIndex={columnIndex}
+                        column={tableColumn}
+                        focuszoneId={focuszoneId}
+                        isFirstActionableHeader={isFirstActionableHeader}>
+                        <div className="bolt-table-header-cell-text text-ellipsis body-s"><span>Merge Status</span></div>
+                    </TableHeaderCell>
+                )
+            },
             renderCell: (
                 rowIndex: number,
                 columnIndex: number,
