@@ -24,8 +24,7 @@ import {
     TwoLineTableCell,
     ColumnSorting,
     SortOrder,
-    sortItems,
-    TableHeaderCell,
+    sortItems
 } from "azure-devops-ui/Table";
 import Constants from "./Constants";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
