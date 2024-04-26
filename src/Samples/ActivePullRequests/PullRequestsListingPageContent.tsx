@@ -24,7 +24,7 @@ import {
     TwoLineTableCell,
     ColumnSorting,
     SortOrder,
-    sortItems,
+    sortItems
 } from "azure-devops-ui/Table";
 import Constants from "./Constants";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
@@ -318,6 +318,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             id: "mergeStatus",
             name: "Merge Status",
             readonly: true,
+            headerClassName: "merge-status-header",
             renderCell: (
                 rowIndex: number,
                 columnIndex: number,
