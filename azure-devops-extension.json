@@ -2,7 +2,7 @@
     "manifestVersion": 1,
     "id": "active-pull-requests",
     "publisher": "karlingen",
-    "version": "1.0.31",
+    "version": "1.0.32",
     "name": "Active Pull Requests",
     "description": "Azure DevOps Extension",
     "categories": [
