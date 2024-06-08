@@ -2,7 +2,16 @@ import React from "react";
 import * as SDK from "azure-devops-extension-sdk";
 import { ObservableValue } from "azure-devops-ui/Core/Observable";
 import { IFilter, Filter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
-import { GitPullRequest, GitPullRequestStatus, GitRepository, GitRestClient, PullRequestAsyncStatus, PullRequestStatus } from "azure-devops-extension-api/Git";
+import {
+    GitPullRequest,
+    GitPullRequestCommentThread,
+    GitRepository,
+    GitRestClient,
+    PullRequestAsyncStatus,
+    PullRequestStatus,
+    PullRequestTimeRangeType,
+    CommentThreadStatus
+} from "azure-devops-extension-api/Git";
 import { Card } from "azure-devops-ui/Card";
 import { Status, Statuses, StatusSize, IStatusProps } from "azure-devops-ui/Status";
 import { Tooltip } from "azure-devops-ui/TooltipEx";
@@ -37,10 +46,15 @@ interface IPullRequestsListingPageContentProps {
     showOnlyCurrentUser: boolean;
 }
 
+interface Dictionary<T> {
+    [Key: string]: T;
+}
+
 interface IPullRequestsListingPageContentState {
     filtering: boolean;
     allPullRequests: GitPullRequest[];
     filteredItems: GitPullRequest[];
+    commentThreadsByPRId: Dictionary<GitPullRequestCommentThread[]>;
     loading: boolean;
     currentUserId: string;
 }
@@ -61,6 +75,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             filtering: false,
             filteredItems: [],
             allPullRequests: [],
+            commentThreadsByPRId: {},
             loading: true,
             currentUserId: ""
         };
@@ -84,16 +99,27 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             return;
         }
 
-        let pullRequests = await gitRestClient.getPullRequestsByProject(currentProject.id, {
-            creatorId: this.props.showOnlyCurrentUser ? currentUser.id : "",
-            includeLinks: false,
-            repositoryId: "",
-            reviewerId: "",
-            sourceRefName: "",
-            sourceRepositoryId: "",
-            status: PullRequestStatus.Active,
-            targetRefName: ""
-        },
+        let creationDateStart = new Date();
+        creationDateStart.setFullYear(creationDateStart.getFullYear() - 10);
+
+        let creationDateEnd = new Date();
+        creationDateEnd.setFullYear(creationDateEnd.getFullYear() + 1);
+
+        let pullRequests = await gitRestClient.getPullRequestsByProject(
+            currentProject.id,
+            {
+                creatorId: this.props.showOnlyCurrentUser ? currentUser.id : "",
+                includeLinks: false,
+                repositoryId: "",
+                reviewerId: "",
+                sourceRefName: "",
+                sourceRepositoryId: "",
+                status: PullRequestStatus.Active,
+                targetRefName: "",
+                minTime: creationDateStart,
+                maxTime: creationDateEnd,
+                queryTimeRangeType: PullRequestTimeRangeType.Created
+            },
             undefined,
             undefined,
             // Top should be set to '0' to retrieve all repositories. Otherwise, there will be a limit of 100 items.
@@ -101,8 +127,17 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             0);
 
         if (pullRequests && pullRequests.length > 0) {
+
+            let commentThreads: Dictionary<GitPullRequestCommentThread[]> = {};
+            for await (const pullRequest of pullRequests) {
+                commentThreads[pullRequest.pullRequestId] = (await gitRestClient.getThreads(pullRequest.repository.id, pullRequest.pullRequestId))
+                    ?.filter(x => !x.isDeleted && (x.status == CommentThreadStatus.Active || x.status == CommentThreadStatus.Fixed))
+                    ?? [];
+            }
+
             this.setState({
-                allPullRequests: pullRequests
+                allPullRequests: pullRequests,
+                commentThreadsByPRId: commentThreads
             })
 
             // Now that all the await calls are done, we are ready to filter by perferred repos.
@@ -318,7 +353,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             id: "mergeStatus",
             name: "Merge Status",
             readonly: true,
-            headerClassName: "merge-status-header",
+            headerClassName: "centered-header",
             renderCell: (
                 rowIndex: number,
                 columnIndex: number,
@@ -340,6 +375,42 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 );
             },
             width: new ObservableValue(-30)
+        },
+        {
+            id: "comments",
+            name: "Comments",
+            readonly: true,
+            headerClassName: "centered-header",
+            renderCell: (
+                rowIndex: number,
+                columnIndex: number,
+                tableColumn: ITableColumn<GitPullRequest>,
+                tableItem: GitPullRequest
+            ): JSX.Element => {
+
+                const total: number = this.state.commentThreadsByPRId[tableItem.pullRequestId].length;
+                const resolved: number = this.state.commentThreadsByPRId[tableItem.pullRequestId]
+                    .filter(x => x.status != CommentThreadStatus.Active).length
+                const unresolved = total - resolved;
+
+                let tooltipText = `${unresolved} unresolved ${unresolved == 1 ? "comment" : "comments"}`;
+                if (total == resolved) {
+                    tooltipText = "No unresolved comments"
+                }
+
+                return (
+                    <SimpleTableCell
+                        columnIndex={columnIndex}
+                        tableColumn={tableColumn}
+                        key={"col-" + columnIndex}
+                        contentClassName="fontSizeM font-size-m scroll-hidden justify-center">
+                        <Tooltip text={tooltipText}>
+                            <span className={resolved == total ? "has-only-resolved-comments" : "has-unresolved-comments"}>{total == 0 ? "" : `${resolved}/${total}`}</span>
+                        </Tooltip>
+                    </SimpleTableCell>
+                );
+            },
+            width: new ObservableValue(-25)
         },
         {
             id: "reviewers",
@@ -500,9 +571,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
 function getPullRequestStatusIndicatorData(status: PullRequestAsyncStatus): IStatusIndicatorData {
     switch (status) {
-        case PullRequestAsyncStatus.NotSet, PullRequestAsyncStatus.Queued:
-            return { statusProps: Statuses.Queued, label: "Unknown" }
-        case PullRequestAsyncStatus.Conflicts, PullRequestAsyncStatus.Failure, PullRequestAsyncStatus.RejectedByPolicy:
+        case PullRequestAsyncStatus.Conflicts:
+        case PullRequestAsyncStatus.Failure:
+        case PullRequestAsyncStatus.RejectedByPolicy:
             return { statusProps: Statuses.Failed, label: "Failed" }
         case PullRequestAsyncStatus.Succeeded:
             return { statusProps: Statuses.Success, label: "Success" }

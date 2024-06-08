@@ -5,7 +5,7 @@ A VSTS extension for showing a list of all active pull requests for chosen proje
 
 # Dependencies
 
-* Node v16
+* Node v18 (run `nvm use` in project root if using [nvm](https://github.com/nvm-sh/nvm))
 
 # Install
     npm install
