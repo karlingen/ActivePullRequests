@@ -24,6 +24,7 @@ import Constants from "./Constants";
 interface IActivePullRequestsContentState {
     baseUrl: string | undefined;
     allRepositories: GitRepository[];
+    title: String;
 }
 
 class TabTypes {
@@ -36,13 +37,15 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
     private _filterToggled = new ObservableValue<boolean | undefined>(false);
     private _repositoryFilter = new Filter();
     private _repositorySelection = new DropdownMultiSelection();
+    private _baseTitle = "Active Pull Requests" + (process.env.NODE_ENV == "development" ? " - DEV" : "");
 
     constructor(props: {}) {
         super(props);
 
         this.state = {
             baseUrl: undefined,
-            allRepositories: []
+            allRepositories: [],
+            title: this._baseTitle,
         };
     }
 
@@ -55,8 +58,8 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         const gitRestClient: GitRestClient = getClient(GitRestClient);
 
         const currentProject = await projectService.getProject();
-        const allRepositories = await (await gitRestClient.getRepositories())
-            .filter(function(repo) { return repo.project.id == currentProject?.id })
+        const allRepositories = (await gitRestClient.getRepositories())
+            .filter(function (repo) { return repo.project.id == currentProject?.id; })
             .sort(function (repoA, repoB) { return (repoA.name > repoB.name) ? 1 : ((repoB.name > repoA.name) ? -1 : 0); });
 
         const currentLocation = await locationService.getResourceAreaLocation(GitRestClient.RESOURCE_AREA_ID);
@@ -67,7 +70,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         return (
             <Surface background={SurfaceBackground.neutral}>
                 <Page className="flex-grow">
-                    <Header title={"Active Pull Requests" + (process.env.NODE_ENV == "development" ? " - DEV" : "")} titleSize={TitleSize.Large} className={"margin-bottom-8"} />
+                    <Header title={this.state.title} titleSize={TitleSize.Large} className={"margin-bottom-8"} />
 
                     <TabBar
                         selectedTabId={this._selectedTabId}
@@ -102,9 +105,23 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                         <Observer selectedTabId={this._selectedTabId}>
                             {(props: { selectedTabId: string }) => {
                                 return props.selectedTabId == TabTypes.All ? (
-                                    <PullRequestsListingPageContent key={`${TabTypes.All}-list`} filter={this._repositoryFilter} filterByPersistedRepositories={() => this.filterByPersistedRepositories()} baseUrl={this.state.baseUrl} showOnlyCurrentUser={false} />
+                                    <PullRequestsListingPageContent
+                                        key={`${TabTypes.All}-list`}
+                                        filter={this._repositoryFilter}
+                                        filterByPersistedRepositories={() => this.filterByPersistedRepositories()}
+                                        baseUrl={this.state.baseUrl}
+                                        showOnlyCurrentUser={false}
+                                        updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
+                                    />
                                 ) : (
-                                    <PullRequestsListingPageContent key={`${TabTypes.Mine}-list`} filter={this._repositoryFilter} filterByPersistedRepositories={() => this.filterByPersistedRepositories()} baseUrl={this.state.baseUrl} showOnlyCurrentUser={true} />
+                                    <PullRequestsListingPageContent
+                                        key={`${TabTypes.Mine}-list`}
+                                        filter={this._repositoryFilter}
+                                        filterByPersistedRepositories={() => this.filterByPersistedRepositories()}
+                                        baseUrl={this.state.baseUrl}
+                                        showOnlyCurrentUser={true}
+                                        updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
+                                    />
                                 )
                             }}
                         </Observer>
@@ -160,6 +177,10 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
 
         return dropDownData;
     };
+
+    private updatePullRequestCount(count: number) {
+        this.setState({ title: this._baseTitle + ` (${count})` })
+    }
 }
 
 showRootComponent(<ActivePullRequestsContent />);

@@ -44,6 +44,7 @@ interface IPullRequestsListingPageContentProps {
     baseUrl: string | undefined;
     filterByPersistedRepositories: () => void;
     showOnlyCurrentUser: boolean;
+    updatePullrequestCount: (count: number) => void;
 }
 
 interface Dictionary<T> {
@@ -145,6 +146,14 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         }
 
         this.setState({ loading: false, currentUserId: currentUser.id });
+    }
+
+    componentDidUpdate(prevProps: Readonly<IPullRequestsListingPageContentProps>, prevState: Readonly<IPullRequestsListingPageContentState>, snapshot?: any): void {
+        if (this.state.filteredItems.length !== prevState.filteredItems.length) {
+            this.props.updatePullrequestCount(this.state.filtering
+                ? this.state.filteredItems.length
+                : this.state.allPullRequests.length);
+        }
     }
 
     componentWillUnmount() {
