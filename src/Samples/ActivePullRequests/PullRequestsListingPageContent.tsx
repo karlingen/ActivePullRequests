@@ -1,7 +1,7 @@
 import React from "react";
 import * as SDK from "azure-devops-extension-sdk";
 import { ObservableValue } from "azure-devops-ui/Core/Observable";
-import { IFilter, Filter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
+import { IFilter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
 import {
     GitPullRequest,
     GitPullRequestCommentThread,
