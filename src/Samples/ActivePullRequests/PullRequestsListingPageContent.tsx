@@ -562,6 +562,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                     <div className="flex-row scroll-hidden">
                         <Link
                             href={this.getPRUrl(repository.project.name, repository.name, pullRequestId)}
+                            className="no-underline-link"
                             onClick={(e) => {
                                 e.preventDefault()
                                 this.navigateToPullRequest(repository.project.name, repository.name, pullRequestId);
