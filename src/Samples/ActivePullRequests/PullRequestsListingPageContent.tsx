@@ -472,6 +472,24 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
     ];
 
     private async ensureThreadsLoadedForPRs(pullRequests: GitPullRequest[]) {
+        // First, hydrate component state from cache for any visible PRs
+        // that have cached threads but are not yet present in state.
+        const fromCache: Dictionary<GitPullRequestCommentThread[]> = {};
+        for (const pr of pullRequests) {
+            const id = pr.pullRequestId;
+            const inState = Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, id);
+            const inCache = Object.prototype.hasOwnProperty.call(commentThreadsCache, id);
+            if (!inState && inCache) {
+                fromCache[id] = commentThreadsCache[id];
+            }
+        }
+
+        if (Object.keys(fromCache).length > 0 && this._isMounted) {
+            this.setState(prev => ({
+                commentThreadsByPRId: { ...prev.commentThreadsByPRId, ...fromCache }
+            }));
+        }
+
         // Determine which PRs need fetching (not already in state or cache)
         const toFetch = pullRequests.filter(pr =>
             !Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, pr.pullRequestId) &&
