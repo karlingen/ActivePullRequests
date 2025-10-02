@@ -1,7 +1,7 @@
 import React from "react";
 import * as SDK from "azure-devops-extension-sdk";
 import { ObservableValue } from "azure-devops-ui/Core/Observable";
-import { IFilter, Filter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
+import { IFilter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
 import {
     GitPullRequest,
     GitPullRequestCommentThread,
@@ -51,6 +51,8 @@ interface Dictionary<T> {
     [Key: string]: T;
 }
 
+const commentThreadsCache: { [key: number]: GitPullRequestCommentThread[] } = {};
+
 interface IPullRequestsListingPageContentState {
     filtering: boolean;
     allPullRequests: GitPullRequest[];
@@ -68,6 +70,7 @@ interface IStatusIndicatorData {
 class PullRequestsListingPageContent extends React.Component<IPullRequestsListingPageContentProps, IPullRequestsListingPageContentState> {
     private _navigationService: IHostNavigationService;
     private _dataManager?: IExtensionDataManager;
+    private _isMounted: boolean = false;
 
     constructor(props: IPullRequestsListingPageContentProps) {
         super(props);
@@ -83,6 +86,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
     }
 
     async componentDidMount() {
+        this._isMounted = true;
         this.props.filter.subscribe(this.onFilterChanged, FILTER_CHANGE_EVENT);
 
         const gitRestClient: GitRestClient = getClient(GitRestClient);
@@ -126,26 +130,23 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             // Top should be set to '0' to retrieve all repositories. Otherwise, there will be a limit of 100 items.
             // We should revisit this when/if this will cause performance issues in the future.
             0);
-
         if (pullRequests && pullRequests.length > 0) {
-
-            let commentThreads: Dictionary<GitPullRequestCommentThread[]> = {};
-            for await (const pullRequest of pullRequests) {
-                commentThreads[pullRequest.pullRequestId] = (await gitRestClient.getThreads(pullRequest.repository.id, pullRequest.pullRequestId))
-                    ?.filter(x => !x.isDeleted && (x.status == CommentThreadStatus.Active || x.status == CommentThreadStatus.Fixed))
-                    ?? [];
+            // Set PRs and render immediately without threads; let filters determine visible set before we load threads.
+            if (this._isMounted) {
+                this.setState({
+                    allPullRequests: pullRequests,
+                    currentUserId: currentUser.id,
+                    loading: false
+                });
             }
 
-            this.setState({
-                allPullRequests: pullRequests,
-                commentThreadsByPRId: commentThreads
-            })
-
-            // Now that all the await calls are done, we are ready to filter by perferred repos.
+            // Apply persisted repository filters, which will trigger onFilterChanged and update filteredItems.
             this.props.filterByPersistedRepositories();
+        } else {
+            if (this._isMounted) {
+                this.setState({ loading: false, currentUserId: currentUser.id });
+            }
         }
-
-        this.setState({ loading: false, currentUserId: currentUser.id });
     }
 
     componentDidUpdate(prevProps: Readonly<IPullRequestsListingPageContentProps>, prevState: Readonly<IPullRequestsListingPageContentState>, snapshot?: any): void {
@@ -153,11 +154,15 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             this.props.updatePullrequestCount(this.state.filtering
                 ? this.state.filteredItems.length
                 : this.state.allPullRequests.length);
+
+            // Ensure comment threads are loaded for the currently visible PRs
+            this.ensureThreadsLoadedForPRs(this.state.filteredItems);
         }
     }
 
     componentWillUnmount() {
         this.props.filter.unsubscribe(this.onFilterChanged, FILTER_CHANGE_EVENT);
+        this._isMounted = false;
     }
 
     render() {
@@ -397,15 +402,23 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 tableItem: GitPullRequest
             ): JSX.Element => {
 
-                const total: number = this.state.commentThreadsByPRId[tableItem.pullRequestId].length;
-                const resolved: number = this.state.commentThreadsByPRId[tableItem.pullRequestId]
-                    .filter(x => x.status != CommentThreadStatus.Active).length
+                const hasThreads = Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, tableItem.pullRequestId);
+                const threads = hasThreads ? this.state.commentThreadsByPRId[tableItem.pullRequestId] : [];
+                const total: number = threads.length;
+                const resolved: number = threads.filter(x => x.status != CommentThreadStatus.Active).length
                 const unresolved = total - resolved;
 
-                let tooltipText = `${unresolved} unresolved ${unresolved == 1 ? "comment" : "comments"}`;
-                if (total == resolved) {
-                    tooltipText = "No unresolved comments"
+                let tooltipText = "";
+                if (!hasThreads) {
+                    tooltipText = "Loading comments";
+                } else {
+                    tooltipText = `${unresolved} unresolved ${unresolved == 1 ? "comment" : "comments"}`;
+                    if (total == resolved) {
+                        tooltipText = "No unresolved comments"
+                    }
                 }
+
+                const displayText = !hasThreads ? "…" : (total == 0 ? "" : `${resolved}/${total}`);
 
                 return (
                     <SimpleTableCell
@@ -414,7 +427,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         key={"col-" + columnIndex}
                         contentClassName="fontSizeM font-size-m scroll-hidden justify-center">
                         <Tooltip text={tooltipText}>
-                            <span className={resolved == total ? "has-only-resolved-comments" : "has-unresolved-comments"}>{total == 0 ? "" : `${resolved}/${total}`}</span>
+                            <span className={!hasThreads ? "" : (resolved == total ? "has-only-resolved-comments" : "has-unresolved-comments")}>{displayText}</span>
                         </Tooltip>
                     </SimpleTableCell>
                 );
@@ -458,6 +471,75 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         }
     ];
 
+    private async ensureThreadsLoadedForPRs(pullRequests: GitPullRequest[]) {
+        // Determine which PRs need fetching (not already in state or cache)
+        const toFetch = pullRequests.filter(pr =>
+            !Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, pr.pullRequestId) &&
+            !Object.prototype.hasOwnProperty.call(commentThreadsCache, pr.pullRequestId)
+        );
+
+        if (toFetch.length > 0) {
+            // Fire and forget; do not block UI
+            this.fetchCommentThreadsForPRs(toFetch);
+        }
+    }
+
+    private async fetchCommentThreadsForPRs(pullRequests: GitPullRequest[]) {
+        const gitRestClient: GitRestClient = getClient(GitRestClient);
+        const maxConcurrency = 6; // Avoid overloading the API/browser
+        let index = 0;
+
+        const worker = async () => {
+            let localBatch: Dictionary<GitPullRequestCommentThread[]> = {};
+            const batchSize = 10;
+            while (true) {
+                const i = index++;
+                if (i >= pullRequests.length) {
+                    break;
+                }
+                const pr = pullRequests[i];
+
+                // Skip if already cached (race-safe check)
+                if (Object.prototype.hasOwnProperty.call(commentThreadsCache, pr.pullRequestId)) {
+                    localBatch[pr.pullRequestId] = commentThreadsCache[pr.pullRequestId];
+                } else {
+                    try {
+                        const threads = await gitRestClient.getThreads(pr.repository.id, pr.pullRequestId);
+                        const filtered = threads?.filter(x => !x.isDeleted && (x.status == CommentThreadStatus.Active || x.status == CommentThreadStatus.Fixed)) ?? [];
+                        commentThreadsCache[pr.pullRequestId] = filtered;
+                        localBatch[pr.pullRequestId] = filtered;
+                    } catch (e) {
+                        // On error, store empty to avoid blocking UI
+                        commentThreadsCache[pr.pullRequestId] = [];
+                        localBatch[pr.pullRequestId] = [];
+                    }
+                }
+
+                if (Object.keys(localBatch).length >= batchSize) {
+                    const toApply = localBatch;
+                    localBatch = {};
+                    if (this._isMounted) {
+                        this.setState(prev => ({
+                            commentThreadsByPRId: { ...prev.commentThreadsByPRId, ...toApply }
+                        }));
+                    }
+                }
+            }
+
+            // Flush any remaining items in this worker's batch
+            if (Object.keys(localBatch).length > 0) {
+                const toApply = localBatch;
+                if (this._isMounted) {
+                    this.setState(prev => ({
+                        commentThreadsByPRId: { ...prev.commentThreadsByPRId, ...toApply }
+                    }));
+                }
+            }
+        };
+
+        await Promise.all(new Array(maxConcurrency).fill(0).map(() => worker()));
+    }
+
     private getPRUrl(projectName: string, repositoryName: string, pullRequestId): string {
         return this.props.baseUrl + encodeURIComponent(projectName) + '/_git/' + encodeURIComponent(repositoryName) + '/pullRequest/' + pullRequestId;
     }
@@ -480,6 +562,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                     <div className="flex-row scroll-hidden">
                         <Link
                             href={this.getPRUrl(repository.project.name, repository.name, pullRequestId)}
+                            className="no-underline-link"
                             onClick={(e) => {
                                 e.preventDefault()
                                 this.navigateToPullRequest(repository.project.name, repository.name, pullRequestId);
@@ -508,6 +591,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         if (stateToPersist !== null && stateToPersist !== undefined) {
             await this._dataManager?.setValue(Constants.UserRepositoriesKey, stateToPersist, { scopeType: "User" });
         }
+
+        // Ensure we load threads for the currently visible PRs only
+        this.ensureThreadsLoadedForPRs(filteredPullRequests);
     };
 
     private filterItems = (selectedRepositories: GitRepository[]): GitPullRequest[] => {
