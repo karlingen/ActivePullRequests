@@ -39,6 +39,11 @@ import Constants from "./Constants";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
 import { AgoFormat } from "azure-devops-ui/Utilities/Date";
 
+// Avatar API constants
+const VSSPS_BASE_URL = "https://vssps.dev.azure.com";
+const GRAPH_API_VERSION = "7.1";
+const GRAPH_AVATAR_PATH = "_apis/graph/Subjects";
+
 interface IPullRequestsListingPageContentProps {
     filter: IFilter;
     baseUrl: string | undefined;
@@ -51,7 +56,9 @@ interface Dictionary<T> {
     [Key: string]: T;
 }
 
+// Global caches to persist data across component instances
 const commentThreadsCache: { [key: number]: GitPullRequestCommentThread[] } = {};
+const avatarCache: { [descriptor: string]: string } = {}; // Maps descriptor to base64 data URL
 
 interface IPullRequestsListingPageContentState {
     filtering: boolean;
@@ -60,6 +67,7 @@ interface IPullRequestsListingPageContentState {
     commentThreadsByPRId: Dictionary<GitPullRequestCommentThread[]>;
     loading: boolean;
     currentUserId: string;
+    avatarDataUrls: Dictionary<string>;
 }
 
 interface IStatusIndicatorData {
@@ -71,6 +79,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
     private _navigationService: IHostNavigationService;
     private _dataManager?: IExtensionDataManager;
     private _isMounted: boolean = false;
+    private _accessToken?: string;
 
     constructor(props: IPullRequestsListingPageContentProps) {
         super(props);
@@ -81,7 +90,8 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             allPullRequests: [],
             commentThreadsByPRId: {},
             loading: true,
-            currentUserId: ""
+            currentUserId: "",
+            avatarDataUrls: {}
         };
     }
 
@@ -92,6 +102,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         const gitRestClient: GitRestClient = getClient(GitRestClient);
         const projectService = await SDK.getService<IProjectPageService>(CommonServiceIds.ProjectPageService);
         const accessToken = await SDK.getAccessToken();
+        this._accessToken = accessToken;
         const extDataService = await SDK.getService<IExtensionDataService>(CommonServiceIds.ExtensionDataService);
         const currentUser = SDK.getUser();
 
@@ -157,6 +168,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
             // Ensure comment threads are loaded for the currently visible PRs
             this.ensureThreadsLoadedForPRs(this.state.filteredItems);
+            
+            // Ensure avatars are loaded for the currently visible PRs
+            this.ensureAvatarsLoadedForPRs(this.state.filteredItems);
         }
     }
 
@@ -223,7 +237,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         tableColumn={tableColumn}
                         key={"col-" + columnIndex}
                         contentClassName="fontSizeM font-size-m scroll-hidden">
-                        <VssPersona imageUrl={tableItem.createdBy.imageUrl} displayName={tableItem.createdBy.displayName} size="small-plus" />
+                        <VssPersona imageUrl={this.getAvatarUrl(tableItem.createdBy)} displayName={tableItem.createdBy.displayName} size="small-plus" />
                     </SimpleTableCell>
                 );
             },
@@ -454,7 +468,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                             return <React.Fragment key={index}>
                                 <Tooltip overflowOnly={false} text={reviewer.displayName}>
                                     <div className={"flex-column margin-right-4 relative"}>
-                                        <VssPersona imageUrl={reviewer.imageUrl} displayName={reviewer.displayName} size={"small"} />
+                                        <VssPersona imageUrl={this.getAvatarUrl(reviewer)} displayName={reviewer.displayName} size={"small"} />
                                         <Status
                                             {...statusIndicatorData.statusProps}
                                             size={StatusSize.m}
@@ -678,6 +692,177 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
     private navigateToPullRequest(projectName: string, repositoryName: string, pullRequestId: number) {
         this._navigationService.navigate(this.getPRUrl(projectName, repositoryName, pullRequestId));
+    }
+
+    /**
+     * Builds the Graph API URL for fetching avatar data
+     */
+    private buildGraphAvatarUrl(organization: string, descriptor: string): string {
+        return `${VSSPS_BASE_URL}/${organization}/${GRAPH_AVATAR_PATH}/${encodeURIComponent(descriptor)}/avatars?api-version=${GRAPH_API_VERSION}`;
+    }
+
+    /**
+     * Extracts organization name from the base URL
+     */
+    private extractOrganization(baseUrl: string): string | undefined {
+        const orgMatch = baseUrl.match(/\/\/[^\/]+\/([^\/]+)\//);
+        return orgMatch ? orgMatch[1] : undefined;
+    }
+
+    /**
+     * Extracts descriptor from GraphProfile/MemberAvatars URL
+     * E.g., from "https://dev.azure.com/org/_apis/GraphProfile/MemberAvatars/aad.XXX" returns "aad.XXX"
+     */
+    private extractDescriptorFromAvatarUrl(avatarUrl: string): string | undefined {
+        const match = avatarUrl.match(/\/MemberAvatars\/([^\/\?]+)/);
+        return match ? match[1] : undefined;
+    }
+
+    /**
+     * Fetches avatar from Graph API and converts base64 data to data URL
+     * Results are cached to avoid redundant API calls
+     */
+    private async fetchAvatarAsDataUrl(descriptor: string): Promise<string | undefined> {
+        if (!this.props.baseUrl || !this._accessToken) {
+            return undefined;
+        }
+
+        // Check cache first
+        if (avatarCache[descriptor]) {
+            return avatarCache[descriptor];
+        }
+
+        try {
+            const organization = this.extractOrganization(this.props.baseUrl);
+            if (!organization) {
+                return undefined;
+            }
+
+            const url = this.buildGraphAvatarUrl(organization, descriptor);
+            
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${this._accessToken}`,
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                console.error(`Avatar fetch failed: ${response.status} ${response.statusText}`);
+                return undefined;
+            }
+
+            const data = await response.json();
+            if (data.value) {
+                const dataUrl = `data:image/png;base64,${data.value}`;
+                avatarCache[descriptor] = dataUrl;
+                return dataUrl;
+            }
+        } catch (error) {
+            console.error('Error fetching avatar:', error);
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Ensures avatars are loaded for all users in the visible pull requests
+     * Fetches missing avatars in parallel with concurrency control
+     */
+    private async ensureAvatarsLoadedForPRs(pullRequests: GitPullRequest[]) {
+        const descriptorsToFetch: string[] = [];
+        const identities: Array<{ descriptor: string }> = [];
+
+        // Collect all unique descriptors from creators and reviewers
+        for (const pr of pullRequests) {
+            // Add creator descriptor
+            if (pr.createdBy?.descriptor) {
+                identities.push({ descriptor: pr.createdBy.descriptor });
+            }
+            
+            // Add reviewer descriptors
+            if (pr.reviewers) {
+                for (const reviewer of pr.reviewers) {
+                    // Try direct descriptor property first
+                    if (reviewer.descriptor) {
+                        identities.push({ descriptor: reviewer.descriptor });
+                    }
+                    // If no direct descriptor, try extracting from _links.avatar.href
+                    else if (reviewer._links?.avatar?.href) {
+                        const descriptor = this.extractDescriptorFromAvatarUrl(reviewer._links.avatar.href);
+                        if (descriptor) {
+                            identities.push({ descriptor });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Find descriptors not yet cached
+        for (const identity of identities) {
+            const inCache = avatarCache[identity.descriptor] !== undefined;
+            const inState = this.state.avatarDataUrls[identity.descriptor] !== undefined;
+            if (!inCache && !inState && !descriptorsToFetch.includes(identity.descriptor)) {
+                descriptorsToFetch.push(identity.descriptor);
+            }
+        }
+
+        // Fetch avatars in parallel (but limit concurrency)
+        if (descriptorsToFetch.length > 0) {
+            const maxConcurrency = 6;
+            const results: Dictionary<string> = {};
+
+            const fetchBatch = async (descriptors: string[]) => {
+                await Promise.all(
+                    descriptors.map(async (descriptor) => {
+                        const dataUrl = await this.fetchAvatarAsDataUrl(descriptor);
+                        if (dataUrl) {
+                            results[descriptor] = dataUrl;
+                        }
+                    })
+                );
+            };
+
+            // Process in batches
+            for (let i = 0; i < descriptorsToFetch.length; i += maxConcurrency) {
+                const batch = descriptorsToFetch.slice(i, i + maxConcurrency);
+                await fetchBatch(batch);
+            }
+
+            // Update state with fetched avatars
+            if (Object.keys(results).length > 0 && this._isMounted) {
+                this.setState(prev => ({
+                    avatarDataUrls: { ...prev.avatarDataUrls, ...results }
+                }));
+            }
+        }
+    }
+
+    /**
+     * Gets the avatar URL for an identity
+     * Prioritizes cached data URLs from Graph API, then falls back to default image URLs
+     */
+    private getAvatarUrl(identity?: { id?: string; imageUrl?: string; descriptor?: string; _links?: any }): string | undefined {
+        if (!identity) {
+            return undefined;
+        }
+        
+        // Try to get descriptor from identity or extract from _links.avatar.href
+        let descriptor = identity.descriptor;
+        if (!descriptor && identity._links?.avatar?.href) {
+            descriptor = this.extractDescriptorFromAvatarUrl(identity._links.avatar.href);
+        }
+        
+        // Use cached data URL if available (fetched from Graph API)
+        if (descriptor) {
+            const cachedDataUrl = avatarCache[descriptor] || this.state.avatarDataUrls[descriptor];
+            if (cachedDataUrl) {
+                return cachedDataUrl;
+            }
+        }
+        
+        // Fall back to _links.avatar.href or imageUrl
+        return identity._links?.avatar?.href || identity.imageUrl;
     }
 }
 
