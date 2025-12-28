@@ -48,10 +48,10 @@ const GRAPH_AVATAR_PATH = "_apis/graph/Subjects";
 interface IPullRequestsListingPageContentProps {
     filter: IFilter;
     baseUrl: string | undefined;
-    filterByPersistedRepositories: () => void;
+    filterByPersistedRepositories: () => Promise<void>;
     showOnlyCurrentUser: boolean;
     updatePullrequestCount: (count: number) => void;
-    updateUsers?: (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => void;
+    updateUsers?: (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => Promise<void>;
 }
 
 interface Dictionary<T> {
@@ -144,17 +144,25 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             // We should revisit this when/if this will cause performance issues in the future.
             0);
         if (pullRequests && pullRequests.length > 0) {
-            // Set PRs and render immediately without threads; let filters determine visible set before we load threads.
+            // Set PRs but keep loading state true until filters are applied
             if (this._isMounted) {
                 this.setState({
                     allPullRequests: pullRequests,
-                    currentUserId: currentUser.id,
-                    loading: false
+                    currentUserId: currentUser.id
                 });
             }
 
+            // Extract and send users, waiting for dropdowns to populate and user filter preselections to complete
+            await this.extractAndSendUsersAsync(pullRequests);
+            
             // Apply persisted repository filters, which will trigger onFilterChanged and update filteredItems.
-            this.props.filterByPersistedRepositories();
+            // At this point all user filters are already preselected by the parent.
+            // Loading state will be set to false after filters are applied.
+            await this.props.filterByPersistedRepositories();
+            
+            if (this._isMounted) {
+                this.setState({ loading: false });
+            }
         } else {
             if (this._isMounted) {
                 this.setState({ loading: false, currentUserId: currentUser.id });
@@ -173,11 +181,6 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             
             // Ensure avatars are loaded for the currently visible PRs
             this.ensureAvatarsLoadedForPRs(this.state.filteredItems);
-        }
-        
-        // Extract and send unique users to parent when allPullRequests changes
-        if (prevState.allPullRequests !== this.state.allPullRequests && this.state.allPullRequests.length > 0) {
-            this.extractAndSendUsers();
         }
     }
 
@@ -635,10 +638,21 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             filteredItems: filteredPullRequests
         });
 
-        // Persist to user storage
-        const stateToPersist = this.props.filter.getFilterItemState(Constants.RepositoriesFilterKey);
-        if (stateToPersist !== null && stateToPersist !== undefined) {
-            await this._dataManager?.setValue(Constants.UserRepositoriesKey, stateToPersist, { scopeType: "User" });
+        // Persist all filter states to user storage
+        if (repositoriesState !== null && repositoriesState !== undefined) {
+            await this._dataManager?.setValue(Constants.UserRepositoriesKey, repositoriesState, { scopeType: "User" });
+        }
+        
+        if (creatorsState !== null && creatorsState !== undefined) {
+            await this._dataManager?.setValue(Constants.UserCreatedByKey, creatorsState, { scopeType: "User" });
+        }
+        
+        if (reviewersState !== null && reviewersState !== undefined) {
+            await this._dataManager?.setValue(Constants.UserReviewersKey, reviewersState, { scopeType: "User" });
+        }
+        
+        if (otherState !== null && otherState !== undefined) {
+            await this._dataManager?.setValue(Constants.UserOtherKey, otherState, { scopeType: "User" });
         }
 
         // Ensure we load threads for the currently visible PRs only
@@ -740,16 +754,15 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         this._navigationService.navigate(this.getPRUrl(projectName, repositoryName, pullRequestId));
     }
 
-    private extractAndSendUsers() {
+    private async extractAndSendUsersAsync(pullRequests: GitPullRequest[]): Promise<void> {
         if (!this.props.updateUsers) {
             return;
         }
 
-        const allPullRequests = this.state.allPullRequests;
         const creatorMap = new Map<string, IdentityRefWithVote>();
         const reviewerMap = new Map<string, IdentityRefWithVote>();
 
-        for (const pr of allPullRequests) {
+        for (const pr of pullRequests) {
             // Add creator
             if (pr.createdBy && pr.createdBy.id) {
                 creatorMap.set(pr.createdBy.id, pr.createdBy as IdentityRefWithVote);
@@ -772,7 +785,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             (a.displayName || '').localeCompare(b.displayName || '')
         );
 
-        this.props.updateUsers(uniqueCreators, uniqueReviewers);
+        await this.props.updateUsers(uniqueCreators, uniqueReviewers);
     }
 
     /**

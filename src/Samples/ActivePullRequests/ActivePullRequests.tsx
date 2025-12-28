@@ -5,15 +5,12 @@ import { Header, TitleSize } from "azure-devops-ui/Header";
 import { Page } from "azure-devops-ui/Page";
 import { showRootComponent } from "../../Common";
 import { getClient, CommonServiceIds, ILocationService, IExtensionDataService, IProjectPageService } from "azure-devops-extension-api";
-import { HeaderCommandBarWithFilter } from "azure-devops-ui/HeaderCommandBar";
 import { GitRestClient, GitRepository, IdentityRefWithVote } from "azure-devops-extension-api/Git";
 import { ConditionalChildren } from "azure-devops-ui/ConditionalChildren";
 import { DropdownFilterBarItem } from "azure-devops-ui/Dropdown";
 import { FilterBar } from "azure-devops-ui/FilterBar";
 import { Surface, SurfaceBackground } from "azure-devops-ui/Surface";
-import { Tab, TabBar } from "azure-devops-ui/Tabs";
 import PullRequestsListingPageContent from "./PullRequestsListingPageContent";
-import { Observer } from "azure-devops-ui/Observer";
 
 import { ObservableValue } from "azure-devops-ui/Core/Observable";
 import { IListBoxItem, LoadingCell, ListBoxItemType } from "azure-devops-ui/ListBox";
@@ -32,13 +29,7 @@ interface IActivePullRequestsContentState {
     otherDropdownItems: IListBoxItem[];
 }
 
-class TabTypes {
-    public static readonly All = "all";
-    public static readonly Mine = "mine";
-}
-
 class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsContentState> {
-    private _selectedTabId = new ObservableValue<string>(TabTypes.All);
     private _filterToggled = new ObservableValue<boolean | undefined>(false);
     private _repositoryFilter = new Filter();
     private _repositorySelection = new DropdownMultiSelection();
@@ -47,6 +38,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
     private _otherSelection = new DropdownMultiSelection();
     private _repoItemsLoaded: boolean = false;
     private _preselectedApplied: boolean = false;
+    private _usersPreselectedApplied: boolean = false;
     private _waitingForRepoItems: boolean = false;
     private _baseTitle = "Active Pull Requests" + (process.env.NODE_ENV == "development" ? " - DEV" : "");
 
@@ -155,16 +147,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         return (
             <Surface background={SurfaceBackground.neutral}>
                 <Page className="flex-grow">
-                    <Header title={this.state.title} titleSize={TitleSize.Large} className={"margin-bottom-8"} />
-
-                    <TabBar
-                        selectedTabId={this._selectedTabId}
-                        onSelectedTabChanged={this.onSelectedTabChanged}
-                        renderAdditionalContent={this.renderTabBarCommands}
-                        disableSticky={true}>
-                        <Tab id={TabTypes.All} name="All" />
-                        <Tab id={TabTypes.Mine} name="Mine" />
-                    </TabBar>
+                    <Header title={this.state.title} titleSize={TitleSize.Large} commandBarItems={this.getCommandBarItems()} />
 
                     <ConditionalChildren renderChildren={this._filterToggled}>
                         <div className="page-content-left page-content-right page-content-top">
@@ -217,48 +200,39 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                     </ConditionalChildren>
 
                     <div className="page-content page-content-top">
-                        <Observer selectedTabId={this._selectedTabId}>
-                            {(props: { selectedTabId: string }) => {
-                                return props.selectedTabId == TabTypes.All ? (
-                                    <PullRequestsListingPageContent
-                                        key={`${TabTypes.All}-list`}
-                                        filter={this._repositoryFilter}
-                                        filterByPersistedRepositories={() => this.filterByPersistedRepositories()}
-                                        baseUrl={this.state.baseUrl}
-                                        showOnlyCurrentUser={false}
-                                        updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
-                                        updateUsers={this.updateUsers}
-                                    />
-                                ) : (
-                                    <PullRequestsListingPageContent
-                                        key={`${TabTypes.Mine}-list`}
-                                        filter={this._repositoryFilter}
-                                        filterByPersistedRepositories={() => this.filterByPersistedRepositories()}
-                                        baseUrl={this.state.baseUrl}
-                                        showOnlyCurrentUser={true}
-                                        updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
-                                        updateUsers={this.updateUsers}
-                                    />
-                                )
-                            }}
-                        </Observer>
-
+                        <PullRequestsListingPageContent
+                            filter={this._repositoryFilter}
+                            filterByPersistedRepositories={() => this.filterByPersistedFilters()}
+                            baseUrl={this.state.baseUrl}
+                            showOnlyCurrentUser={false}
+                            updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
+                            updateUsers={this.updateUsers}
+                        />
                     </div>
                 </Page>
             </Surface>
         );
     }
 
-    private filterByPersistedRepositories = async () => {
+    private filterByPersistedFilters = async (): Promise<void> => {
         const extDataService = await SDK.getService<IExtensionDataService>(CommonServiceIds.ExtensionDataService);
         const context = SDK.getExtensionContext();
         const accessToken = await SDK.getAccessToken();
         const dataManager = await extDataService.getExtensionDataManager(context.publisherId + "." + context.extensionId, accessToken);
-        const persistedState: IFilterItemState | null = await dataManager.getValue(Constants.UserRepositoriesKey, { scopeType: "User" });
-        if (persistedState !== null && persistedState !== undefined) {
-            this._repositoryFilter.setFilterItemState(Constants.RepositoriesFilterKey, persistedState);
-        } else {
-            this._repositoryFilter.reset();
+        
+        // Load persisted repositories filter
+        const persistedRepositoriesState: IFilterItemState | null = await dataManager.getValue(Constants.UserRepositoriesKey, { scopeType: "User" });
+        if (persistedRepositoriesState !== null && persistedRepositoriesState !== undefined) {
+            this._repositoryFilter.setFilterItemState(Constants.RepositoriesFilterKey, persistedRepositoriesState);
+        }
+        
+        // Note: User filters (createdBy, reviewers) are loaded with normalization by applyPersistedUserSelections
+        // which is called from updateUsers callback. We don't load them here to avoid duplication.
+        
+        // Load persisted other filter (doesn't need normalization)
+        const persistedOtherState: IFilterItemState | null = await dataManager.getValue(Constants.UserOtherKey, { scopeType: "User" });
+        if (persistedOtherState !== null && persistedOtherState !== undefined) {
+            this._repositoryFilter.setFilterItemState(Constants.OtherFilterKey, persistedOtherState);
         }
     }
 
@@ -266,18 +240,16 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         this._filterToggled.value = !this._filterToggled.value;
     };
 
-    private renderTabBarCommands = () => {
-        return (
-            <HeaderCommandBarWithFilter
-                filter={this._repositoryFilter}
-                filterToggled={this._filterToggled}
-                items={[]}
-            />
-        );
-    };
-
-    private onSelectedTabChanged = (newTabId: string) => {
-        this._selectedTabId.value = newTabId;
+    private getCommandBarItems = () => {
+        return [
+            {
+                id: "filter",
+                text: "Filter",
+                onActivate: () => { this._filterToggled.value = !this._filterToggled.value; },
+                iconProps: { iconName: "Filter" },
+                important: true,
+            }
+        ];
     };
 
     private onDropdownLoadingMount = async () => {
@@ -349,7 +321,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         this.setState({ title: this._baseTitle + ` (${count})` })
     }
 
-    private updateUsers = (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => {
+    private updateUsers = async (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]): Promise<void> => {
         const creatorItems: IListBoxItem[] = [
             { id: "creator-header", text: "", type: ListBoxItemType.Header },
             ...creators.map(user => ({
@@ -370,10 +342,73 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
             }))
         ];
 
-        this.setState({
-            createdByDropdownItems: creatorItems,
-            reviewersDropdownItems: reviewerItems
+        return new Promise<void>((resolve) => {
+            this.setState({
+                createdByDropdownItems: creatorItems,
+                reviewersDropdownItems: reviewerItems
+            }, async () => {
+                if (!this._usersPreselectedApplied) {
+                    await this.applyPersistedUserSelections(creators, reviewers);
+                    this._usersPreselectedApplied = true;
+                }
+                resolve();
+            });
         });
+    }
+
+    private applyPersistedUserSelections = async (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => {
+        const extDataService = await SDK.getService<IExtensionDataService>(CommonServiceIds.ExtensionDataService);
+        const context = SDK.getExtensionContext();
+        const accessToken = await SDK.getAccessToken();
+        const dataManager = await extDataService.getExtensionDataManager(context.publisherId + "." + context.extensionId, accessToken);
+        
+        // Load and normalize persisted createdBy filter
+        const persistedCreatedByState: IFilterItemState | null = await dataManager.getValue(Constants.UserCreatedByKey, { scopeType: "User" });
+        if (persistedCreatedByState) {
+            const persistedCreators: IdentityRefWithVote[] | undefined = (persistedCreatedByState as any)?.value;
+            const selectedCreatorIds = (persistedCreators ?? [])
+                .filter(user => !!user && !!(user as any).id)
+                .map(user => (user as any).id as string);
+
+            const creatorById: { [id: string]: IdentityRefWithVote } = {};
+            creators.forEach(user => { creatorById[user.id] = user; });
+
+            const normalizedCreators: IdentityRefWithVote[] = selectedCreatorIds
+                .map(id => creatorById[id])
+                .filter((user): user is IdentityRefWithVote => !!user);
+
+            if (normalizedCreators.length > 0) {
+                const normalizedState = { ...(persistedCreatedByState as any), value: normalizedCreators } as IFilterItemState;
+                this._repositoryFilter.setFilterItemState(Constants.CreatedByFilterKey, normalizedState);
+            }
+        }
+        
+        // Load and normalize persisted reviewers filter
+        const persistedReviewersState: IFilterItemState | null = await dataManager.getValue(Constants.UserReviewersKey, { scopeType: "User" });
+        if (persistedReviewersState) {
+            const persistedReviewers: IdentityRefWithVote[] | undefined = (persistedReviewersState as any)?.value;
+            const selectedReviewerIds = (persistedReviewers ?? [])
+                .filter(user => !!user && !!(user as any).id)
+                .map(user => (user as any).id as string);
+
+            const reviewerById: { [id: string]: IdentityRefWithVote } = {};
+            reviewers.forEach(user => { reviewerById[user.id] = user; });
+
+            const normalizedReviewers: IdentityRefWithVote[] = selectedReviewerIds
+                .map(id => reviewerById[id])
+                .filter((user): user is IdentityRefWithVote => !!user);
+
+            if (normalizedReviewers.length > 0) {
+                const normalizedState = { ...(persistedReviewersState as any), value: normalizedReviewers } as IFilterItemState;
+                this._repositoryFilter.setFilterItemState(Constants.ReviewersFilterKey, normalizedState);
+            }
+        }
+        
+        // Load persisted other filter (no normalization needed for simple values)
+        const persistedOtherState: IFilterItemState | null = await dataManager.getValue(Constants.UserOtherKey, { scopeType: "User" });
+        if (persistedOtherState) {
+            this._repositoryFilter.setFilterItemState(Constants.OtherFilterKey, persistedOtherState);
+        }
     }
 }
 
