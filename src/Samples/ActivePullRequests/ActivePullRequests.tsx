@@ -6,7 +6,7 @@ import { Page } from "azure-devops-ui/Page";
 import { showRootComponent } from "../../Common";
 import { getClient, CommonServiceIds, ILocationService, IExtensionDataService, IProjectPageService } from "azure-devops-extension-api";
 import { HeaderCommandBarWithFilter } from "azure-devops-ui/HeaderCommandBar";
-import { GitRestClient, GitRepository } from "azure-devops-extension-api/Git";
+import { GitRestClient, GitRepository, IdentityRefWithVote } from "azure-devops-extension-api/Git";
 import { ConditionalChildren } from "azure-devops-ui/ConditionalChildren";
 import { DropdownFilterBarItem } from "azure-devops-ui/Dropdown";
 import { FilterBar } from "azure-devops-ui/FilterBar";
@@ -27,6 +27,9 @@ interface IActivePullRequestsContentState {
     allRepositories: GitRepository[];
     title: String;
     repoDropdownItems: IListBoxItem[];
+    createdByDropdownItems: IListBoxItem[];
+    reviewersDropdownItems: IListBoxItem[];
+    otherDropdownItems: IListBoxItem[];
 }
 
 class TabTypes {
@@ -39,13 +42,16 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
     private _filterToggled = new ObservableValue<boolean | undefined>(false);
     private _repositoryFilter = new Filter();
     private _repositorySelection = new DropdownMultiSelection();
+    private _createdBySelection = new DropdownMultiSelection();
+    private _reviewersSelection = new DropdownMultiSelection();
+    private _otherSelection = new DropdownMultiSelection();
     private _repoItemsLoaded: boolean = false;
     private _preselectedApplied: boolean = false;
     private _waitingForRepoItems: boolean = false;
     private _baseTitle = "Active Pull Requests" + (process.env.NODE_ENV == "development" ? " - DEV" : "");
 
     private _loadingItem: IListBoxItem = {
-        id: "loading",
+        id: "repo-loading",
         type: ListBoxItemType.Loading,
         render: (
             rowIndex: number,
@@ -65,6 +71,46 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         }
     };
 
+    private _creatorLoadingItem: IListBoxItem = {
+        id: "creator-loading",
+        type: ListBoxItemType.Loading,
+        render: (
+            rowIndex: number,
+            columnIndex: number,
+            tableColumn: ITableColumn<IListBoxItem<{}>>,
+            tableItem: IListBoxItem<{}>
+        ) => {
+            return (
+                <LoadingCell
+                    key={rowIndex}
+                    columnIndex={columnIndex}
+                    tableColumn={tableColumn}
+                    tableItem={tableItem}
+                />
+            );
+        }
+    };
+
+    private _reviewerLoadingItem: IListBoxItem = {
+        id: "reviewer-loading",
+        type: ListBoxItemType.Loading,
+        render: (
+            rowIndex: number,
+            columnIndex: number,
+            tableColumn: ITableColumn<IListBoxItem<{}>>,
+            tableItem: IListBoxItem<{}>
+        ) => {
+            return (
+                <LoadingCell
+                    key={rowIndex}
+                    columnIndex={columnIndex}
+                    tableColumn={tableColumn}
+                    tableItem={tableItem}
+                />
+            );
+        }
+    };
+
     constructor(props: {}) {
         super(props);
 
@@ -72,11 +118,14 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
             baseUrl: undefined,
             allRepositories: [],
             title: this._baseTitle,
-            repoDropdownItems: []
+            repoDropdownItems: [this._loadingItem],
+            createdByDropdownItems: [this._creatorLoadingItem],
+            reviewersDropdownItems: [this._reviewerLoadingItem],
+            otherDropdownItems: [
+                { id: "other-header", text: "", type: ListBoxItemType.Header },
+                { id: "other-draft", text: "Is Draft", data: "isDraft", type: ListBoxItemType.Row },
+            ]
         };
-
-        // Initialize items with a single loading row; real items are set on first open
-        this.state.repoDropdownItems.push(this._loadingItem);
     }
 
     public async componentDidMount() {
@@ -133,6 +182,36 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                                     showPlaceholderAsLabel={true}
                                     noItemsText={"No items"}
                                 />
+                                <DropdownFilterBarItem
+                                    filterItemKey={Constants.CreatedByFilterKey}
+                                    filter={this._repositoryFilter}
+                                    items={this.state.createdByDropdownItems}
+                                    selection={this._createdBySelection}
+                                    showFilterBox={true}
+                                    placeholder="Created By"
+                                    showPlaceholderAsLabel={true}
+                                    noItemsText={"No items"}
+                                />
+                                <DropdownFilterBarItem
+                                    filterItemKey={Constants.ReviewersFilterKey}
+                                    filter={this._repositoryFilter}
+                                    items={this.state.reviewersDropdownItems}
+                                    selection={this._reviewersSelection}
+                                    showFilterBox={true}
+                                    placeholder="Reviewers"
+                                    showPlaceholderAsLabel={true}
+                                    noItemsText={"No items"}
+                                />
+                                <DropdownFilterBarItem
+                                    filterItemKey={Constants.OtherFilterKey}
+                                    filter={this._repositoryFilter}
+                                    items={this.state.otherDropdownItems}
+                                    selection={this._otherSelection}
+                                    showFilterBox={false}
+                                    placeholder="Other"
+                                    showPlaceholderAsLabel={true}
+                                    noItemsText={"No items"}
+                                />
                             </FilterBar>
                         </div>
                     </ConditionalChildren>
@@ -148,6 +227,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                                         baseUrl={this.state.baseUrl}
                                         showOnlyCurrentUser={false}
                                         updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
+                                        updateUsers={this.updateUsers}
                                     />
                                 ) : (
                                     <PullRequestsListingPageContent
@@ -157,6 +237,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                                         baseUrl={this.state.baseUrl}
                                         showOnlyCurrentUser={true}
                                         updatePullrequestCount={(count) => this.updatePullRequestCount(count)}
+                                        updateUsers={this.updateUsers}
                                     />
                                 )
                             }}
@@ -221,8 +302,8 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         this._waitingForRepoItems = false;
 
         let items: IListBoxItem[] = [
-            { id: "header", text: "", type: ListBoxItemType.Header },
-            ...repositories.map(repo => ({ id: repo.id, text: repo.name, data: repo, type: ListBoxItemType.Row }))
+            { id: "repo-header", text: "", type: ListBoxItemType.Header },
+            ...repositories.map(repo => ({ id: `repo-${repo.id}`, text: repo.name, data: repo, type: ListBoxItemType.Row }))
         ];
 
         this.setState({ repoDropdownItems: items }, () => {
@@ -266,6 +347,33 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
 
     private updatePullRequestCount(count: number) {
         this.setState({ title: this._baseTitle + ` (${count})` })
+    }
+
+    private updateUsers = (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => {
+        const creatorItems: IListBoxItem[] = [
+            { id: "creator-header", text: "", type: ListBoxItemType.Header },
+            ...creators.map(user => ({
+                id: `creator-${user.id}`,
+                text: user.displayName || user.uniqueName || user.id,
+                data: user,
+                type: ListBoxItemType.Row
+            }))
+        ];
+
+        const reviewerItems: IListBoxItem[] = [
+            { id: "reviewer-header", text: "", type: ListBoxItemType.Header },
+            ...reviewers.map(user => ({
+                id: `reviewer-${user.id}`,
+                text: user.displayName || user.uniqueName || user.id,
+                data: user,
+                type: ListBoxItemType.Row
+            }))
+        ];
+
+        this.setState({
+            createdByDropdownItems: creatorItems,
+            reviewersDropdownItems: reviewerItems
+        });
     }
 }
 

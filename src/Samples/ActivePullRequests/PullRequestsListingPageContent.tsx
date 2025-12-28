@@ -10,7 +10,8 @@ import {
     PullRequestAsyncStatus,
     PullRequestStatus,
     PullRequestTimeRangeType,
-    CommentThreadStatus
+    CommentThreadStatus,
+    IdentityRefWithVote
 } from "azure-devops-extension-api/Git";
 import { Card } from "azure-devops-ui/Card";
 import { Status, Statuses, StatusSize, IStatusProps } from "azure-devops-ui/Status";
@@ -50,6 +51,7 @@ interface IPullRequestsListingPageContentProps {
     filterByPersistedRepositories: () => void;
     showOnlyCurrentUser: boolean;
     updatePullrequestCount: (count: number) => void;
+    updateUsers?: (creators: IdentityRefWithVote[], reviewers: IdentityRefWithVote[]) => void;
 }
 
 interface Dictionary<T> {
@@ -171,6 +173,11 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             
             // Ensure avatars are loaded for the currently visible PRs
             this.ensureAvatarsLoadedForPRs(this.state.filteredItems);
+        }
+        
+        // Extract and send unique users to parent when allPullRequests changes
+        if (prevState.allPullRequests !== this.state.allPullRequests && this.state.allPullRequests.length > 0) {
+            this.extractAndSendUsers();
         }
     }
 
@@ -463,9 +470,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         tableColumn={tableColumn}
                         key={"col-" + columnIndex}
                         contentClassName="fontSizeM font-size-m scroll-hidden flex-wrap">
-                        {tableItem.reviewers.map((reviewer, index) => {
+                        {tableItem.reviewers.map((reviewer) => {
                             let statusIndicatorData = getVoteStatusIndicatorData(reviewer.vote);
-                            return <React.Fragment key={index}>
+                            return <React.Fragment key={reviewer.id}>
                                 <Tooltip overflowOnly={false} text={reviewer.displayName}>
                                     <div className={"flex-column margin-right-4 relative"}>
                                         <VssPersona imageUrl={this.getAvatarUrl(reviewer)} displayName={reviewer.displayName} size={"small"} />
@@ -609,9 +616,19 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         };
     }
 
-    private onFilterChanged = async ({ repositoriesFilterKey }: IFilterState) => {
-        const selectedRepositories: GitRepository[] = repositoriesFilterKey?.value;
-        const filteredPullRequests = this.filterItems(selectedRepositories);
+    private onFilterChanged = async () => {
+        // Read ALL current filter states from the filter object
+        const repositoriesState = this.props.filter.getFilterItemState(Constants.RepositoriesFilterKey);
+        const creatorsState = this.props.filter.getFilterItemState(Constants.CreatedByFilterKey);
+        const reviewersState = this.props.filter.getFilterItemState(Constants.ReviewersFilterKey);
+        const otherState = this.props.filter.getFilterItemState(Constants.OtherFilterKey);
+        
+        const selectedRepositories: GitRepository[] = repositoriesState?.value;
+        const selectedCreators: IdentityRefWithVote[] = creatorsState?.value;
+        const selectedReviewers: IdentityRefWithVote[] = reviewersState?.value;
+        const otherFilter: any[] = otherState?.value;
+        
+        const filteredPullRequests = this.filterItems(selectedRepositories, selectedCreators, selectedReviewers, otherFilter);
 
         this.setState({
             filtering: this.props.filter.hasChangesToReset(),
@@ -628,23 +645,52 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         this.ensureThreadsLoadedForPRs(filteredPullRequests);
     };
 
-    private filterItems = (selectedRepositories: GitRepository[]): GitPullRequest[] => {
+    private filterItems = (
+        selectedRepositories: GitRepository[],
+        selectedCreators?: IdentityRefWithVote[],
+        selectedReviewers?: IdentityRefWithVote[],
+        otherFilter?: any[]
+    ): GitPullRequest[] => {
+        let filteredItems = [...this.state.allPullRequests];
 
-        const allPullRequests = this.state.allPullRequests;
-        if (!selectedRepositories) {
-            return [...allPullRequests];
+        // Filter by repositories (if any are selected)
+        if (selectedRepositories && selectedRepositories.length > 0) {
+            const repositoryIds = selectedRepositories.filter(x => x !== null && x !== undefined).map(x => x.id);
+            if (repositoryIds.length > 0) {
+                filteredItems = filteredItems.filter(item => {
+                    return repositoryIds.some(repositoryId => repositoryId == item.repository.id);
+                });
+            }
         }
 
-        const repositoryIds = selectedRepositories.filter(x => x !== null && x !== undefined).map(x => x.id);
-        if (repositoryIds.length == 0 || !this.props.filter.hasChangesToReset()) {
-            return [...allPullRequests];
+        // Filter by creators (if any are selected)
+        if (selectedCreators && selectedCreators.length > 0) {
+            const creatorIds = selectedCreators.filter(x => x !== null && x !== undefined).map(x => x.id);
+            if (creatorIds.length > 0) {
+                filteredItems = filteredItems.filter(item => {
+                    return creatorIds.some(creatorId => creatorId === item.createdBy.id);
+                });
+            }
         }
 
-        const filteredItems = allPullRequests.filter(item => {
-            return repositoryIds.some(repositoryId => repositoryId == item.repository.id);
-        });
+        // Filter by reviewers (if any are selected)
+        if (selectedReviewers && selectedReviewers.length > 0) {
+            const reviewerIds = selectedReviewers.filter(x => x !== null && x !== undefined).map(x => x.id);
+            if (reviewerIds.length > 0) {
+                filteredItems = filteredItems.filter(item => {
+                    return item.reviewers.some(reviewer => reviewerIds.includes(reviewer.id));
+                });
+            }
+        }
 
-        return [...filteredItems];
+        // Filter by other criteria
+        if (otherFilter && otherFilter.length > 0) {
+            if (otherFilter.includes(Constants.IsDraftKey)) {
+                filteredItems = filteredItems.filter(item => item.isDraft === true);
+            }
+        }
+
+        return filteredItems;
     };
 
     private sortFunctions = [
@@ -692,6 +738,41 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
     private navigateToPullRequest(projectName: string, repositoryName: string, pullRequestId: number) {
         this._navigationService.navigate(this.getPRUrl(projectName, repositoryName, pullRequestId));
+    }
+
+    private extractAndSendUsers() {
+        if (!this.props.updateUsers) {
+            return;
+        }
+
+        const allPullRequests = this.state.allPullRequests;
+        const creatorMap = new Map<string, IdentityRefWithVote>();
+        const reviewerMap = new Map<string, IdentityRefWithVote>();
+
+        for (const pr of allPullRequests) {
+            // Add creator
+            if (pr.createdBy && pr.createdBy.id) {
+                creatorMap.set(pr.createdBy.id, pr.createdBy as IdentityRefWithVote);
+            }
+
+            // Add reviewers
+            if (pr.reviewers) {
+                for (const reviewer of pr.reviewers) {
+                    if (reviewer && reviewer.id) {
+                        reviewerMap.set(reviewer.id, reviewer);
+                    }
+                }
+            }
+        }
+
+        const uniqueCreators = Array.from(creatorMap.values()).sort((a, b) => 
+            (a.displayName || '').localeCompare(b.displayName || '')
+        );
+        const uniqueReviewers = Array.from(reviewerMap.values()).sort((a, b) => 
+            (a.displayName || '').localeCompare(b.displayName || '')
+        );
+
+        this.props.updateUsers(uniqueCreators, uniqueReviewers);
     }
 
     /**
