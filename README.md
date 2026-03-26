@@ -3,6 +3,10 @@ A VSTS extension for showing a list of all active pull requests for chosen proje
 
 ![alt text](images/screenshot.png)
 
+After installing, open an Azure DevOps project and go to `Repos` -> `Active Pull Requests`.
+
+![Where to find Active Pull Requests in Repos](images/repo.png)
+
 # Dependencies
 
 * Node v18 (run `nvm use` in project root if using [nvm](https://github.com/nvm-sh/nvm))

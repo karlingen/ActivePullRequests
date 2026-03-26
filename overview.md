@@ -5,5 +5,9 @@ Built completely using native design and appearance (Dark Mode - hurray!)
 
 ![Screenshot](https://github.com/karlingen/ActivePullRequests/blob/main/images/screenshot.png?raw=true)
 
+After installing, open an Azure DevOps project and go to `Repos` -> `Active Pull Requests`.
+
+![Where to find Active Pull Requests in Repos](https://github.com/karlingen/ActivePullRequests/blob/main/images/repo.png?raw=true)
+
 # Contribute
 Please visit the Github repository if you would like to contribute to this project.
