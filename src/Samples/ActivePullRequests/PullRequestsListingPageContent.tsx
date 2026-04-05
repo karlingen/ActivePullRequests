@@ -155,10 +155,12 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             // Extract and send users, waiting for dropdowns to populate and user filter preselections to complete
             await this.extractAndSendUsersAsync(pullRequests);
             
-            // Apply persisted repository filters, which will trigger onFilterChanged and update filteredItems.
-            // At this point all user filters are already preselected by the parent.
-            // Loading state will be set to false after filters are applied.
+            // Apply persisted filters (if any), then ensure filteredItems is populated.
+            // onFilterChanged may already have been triggered by setFilterItemState inside
+            // filterByPersistedRepositories, but for fresh installs with no persisted filters
+            // it won't fire, so we call it explicitly to guarantee filteredItems is set.
             await this.props.filterByPersistedRepositories();
+            this.onFilterChanged();
             
             if (this._isMounted) {
                 this.setState({ loading: false });
@@ -168,6 +170,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 this.setState({ loading: false, currentUserId: currentUser.id });
             }
         }
+
     }
 
     componentDidUpdate(prevProps: Readonly<IPullRequestsListingPageContentProps>, prevState: Readonly<IPullRequestsListingPageContentState>, snapshot?: any): void {
