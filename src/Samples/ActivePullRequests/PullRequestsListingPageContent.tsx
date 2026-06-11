@@ -703,8 +703,15 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         // Filter by other criteria
         if (otherFilter && otherFilter.length > 0) {
             if (otherFilter.includes(Constants.IsDraftKey)) {
+                // If the "Draft" filter option is explicitly selected, show ONLY drafts
                 filteredItems = filteredItems.filter(item => item.isDraft === true);
+            } else {
+                // If other criteria are selected but NOT drafts, hide drafts
+                filteredItems = filteredItems.filter(item => !item.isDraft);
             }
+        } else {
+            // Default page-load behavior: Hide drafts if no filters are selected yet
+            filteredItems = filteredItems.filter(item => !item.isDraft);
         }
 
         return filteredItems;
