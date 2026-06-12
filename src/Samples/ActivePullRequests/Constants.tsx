@@ -14,4 +14,5 @@ export default class Constants {
 
     // Filter values
     public static readonly IsDraftKey = "isDraft";
+    public static readonly IsPublishedKey = "isPublished";
 }

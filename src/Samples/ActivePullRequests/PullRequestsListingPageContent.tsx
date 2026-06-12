@@ -700,18 +700,19 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             }
         }
 
-        // Filter by other criteria
+        // Filter by other criteria (Published / Draft toggles)
         if (otherFilter && otherFilter.length > 0) {
-            if (otherFilter.includes(Constants.IsDraftKey)) {
-                // If the "Draft" filter option is explicitly selected, show ONLY drafts
-                filteredItems = filteredItems.filter(item => item.isDraft === true);
-            } else {
-                // If other criteria are selected but NOT drafts, hide drafts
+            const showPublished = otherFilter.includes(Constants.IsPublishedKey);
+            const showDraft = otherFilter.includes(Constants.IsDraftKey);
+
+            if (showPublished && !showDraft) {
                 filteredItems = filteredItems.filter(item => !item.isDraft);
+            } else if (showDraft && !showPublished) {
+                filteredItems = filteredItems.filter(item => item.isDraft === true);
             }
+            // If both are selected, show everything (no filtering needed)
         } else {
-            // Default page-load behavior: Hide drafts if no filters are selected yet
-            filteredItems = filteredItems.filter(item => !item.isDraft);
+            // Nothing selected in Other filter — show everything
         }
 
         return filteredItems;
