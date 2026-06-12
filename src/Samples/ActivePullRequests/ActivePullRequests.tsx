@@ -115,7 +115,8 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
             reviewersDropdownItems: [this._reviewerLoadingItem],
             otherDropdownItems: [
                 { id: "other-header", text: "", type: ListBoxItemType.Header },
-                { id: "other-draft", text: "Is Draft", data: "isDraft", type: ListBoxItemType.Row },
+                { id: "other-published", text: "Published", data: "isPublished", type: ListBoxItemType.Row },
+                { id: "other-draft", text: "Draft", data: "isDraft", type: ListBoxItemType.Row },
             ]
         };
     }
@@ -229,10 +230,12 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         // Note: User filters (createdBy, reviewers) are loaded with normalization by applyPersistedUserSelections
         // which is called from updateUsers callback. We don't load them here to avoid duplication.
         
-        // Load persisted other filter (doesn't need normalization)
+        // Load persisted other filter, or default to "Published" selected
         const persistedOtherState: IFilterItemState | null = await dataManager.getValue(Constants.UserOtherKey, { scopeType: "User" });
         if (persistedOtherState !== null && persistedOtherState !== undefined) {
             this._repositoryFilter.setFilterItemState(Constants.OtherFilterKey, persistedOtherState);
+        } else {
+            this._repositoryFilter.setFilterItemState(Constants.OtherFilterKey, { value: [Constants.IsPublishedKey] });
         }
     }
 
