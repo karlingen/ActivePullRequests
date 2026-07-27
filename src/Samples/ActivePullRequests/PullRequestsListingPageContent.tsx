@@ -13,6 +13,7 @@ import {
     CommentThreadStatus,
     IdentityRefWithVote
 } from "azure-devops-extension-api/Git";
+import { PolicyEvaluationRecord, PolicyEvaluationStatus, PolicyRestClient } from "azure-devops-extension-api/Policy";
 import { Card } from "azure-devops-ui/Card";
 import { Status, Statuses, StatusSize, IStatusProps } from "azure-devops-ui/Status";
 import { Tooltip } from "azure-devops-ui/TooltipEx";
@@ -60,6 +61,7 @@ interface Dictionary<T> {
 
 // Global caches to persist data across component instances
 const commentThreadsCache: { [key: number]: GitPullRequestCommentThread[] } = {};
+const buildPolicyEvaluationsCache: { [key: number]: PolicyEvaluationRecord[] } = {};
 const avatarCache: { [descriptor: string]: string } = {}; // Maps descriptor to base64 data URL
 
 interface IPullRequestsListingPageContentState {
@@ -67,6 +69,7 @@ interface IPullRequestsListingPageContentState {
     allPullRequests: GitPullRequest[];
     filteredItems: GitPullRequest[];
     commentThreadsByPRId: Dictionary<GitPullRequestCommentThread[]>;
+    buildPolicyEvaluationsByPRId: Dictionary<PolicyEvaluationRecord[]>;
     loading: boolean;
     currentUserId: string;
     avatarDataUrls: Dictionary<string>;
@@ -91,6 +94,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             filteredItems: [],
             allPullRequests: [],
             commentThreadsByPRId: {},
+            buildPolicyEvaluationsByPRId: {},
             loading: true,
             currentUserId: "",
             avatarDataUrls: {}
@@ -181,7 +185,10 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
             // Ensure comment threads are loaded for the currently visible PRs
             this.ensureThreadsLoadedForPRs(this.state.filteredItems);
-            
+
+            // Ensure build validation statuses are loaded for the currently visible PRs
+            this.ensureBuildStatusesLoadedForPRs(this.state.filteredItems);
+
             // Ensure avatars are loaded for the currently visible PRs
             this.ensureAvatarsLoadedForPRs(this.state.filteredItems);
         }
@@ -418,6 +425,58 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             width: new ObservableValue(-30)
         },
         {
+            id: "buildStatus",
+            name: "Build",
+            readonly: true,
+            headerClassName: "centered-header",
+            renderCell: (
+                rowIndex: number,
+                columnIndex: number,
+                tableColumn: ITableColumn<GitPullRequest>,
+                tableItem: GitPullRequest
+            ): JSX.Element => {
+
+                const hasEvaluations = Object.prototype.hasOwnProperty.call(this.state.buildPolicyEvaluationsByPRId, tableItem.pullRequestId);
+                const evaluations = hasEvaluations ? this.state.buildPolicyEvaluationsByPRId[tableItem.pullRequestId] : [];
+
+                let content: JSX.Element;
+                if (!hasEvaluations) {
+                    content = (
+                        <Tooltip text="Loading build status">
+                            <span>…</span>
+                        </Tooltip>
+                    );
+                } else if (evaluations.length === 0) {
+                    // No build validation policy applies to this pull request
+                    content = <span />;
+                } else {
+                    const statusIndicatorData = getBuildStatusIndicatorData(evaluations);
+                    content = (
+                        <Tooltip text={getBuildStatusTooltipText(evaluations)}>
+                            <div className="flex-row">
+                                <Status
+                                    {...statusIndicatorData.statusProps}
+                                    className="icon-large-margin"
+                                    size={StatusSize.m}
+                                />
+                            </div>
+                        </Tooltip>
+                    );
+                }
+
+                return (
+                    <SimpleTableCell
+                        columnIndex={columnIndex}
+                        tableColumn={tableColumn}
+                        key={"col-" + columnIndex}
+                        contentClassName="fontSizeM font-size-m scroll-hidden justify-center">
+                        {content}
+                    </SimpleTableCell>
+                );
+            },
+            width: new ObservableValue(-25)
+        },
+        {
             id: "comments",
             name: "Comments",
             readonly: true,
@@ -585,6 +644,98 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         await Promise.all(new Array(maxConcurrency).fill(0).map(() => worker()));
     }
 
+    private async ensureBuildStatusesLoadedForPRs(pullRequests: GitPullRequest[]) {
+        // First, hydrate component state from cache for any visible PRs
+        // that have cached evaluations but are not yet present in state.
+        const fromCache: Dictionary<PolicyEvaluationRecord[]> = {};
+        for (const pr of pullRequests) {
+            const id = pr.pullRequestId;
+            const inState = Object.prototype.hasOwnProperty.call(this.state.buildPolicyEvaluationsByPRId, id);
+            const inCache = Object.prototype.hasOwnProperty.call(buildPolicyEvaluationsCache, id);
+            if (!inState && inCache) {
+                fromCache[id] = buildPolicyEvaluationsCache[id];
+            }
+        }
+
+        if (Object.keys(fromCache).length > 0 && this._isMounted) {
+            this.setState(prev => ({
+                buildPolicyEvaluationsByPRId: { ...prev.buildPolicyEvaluationsByPRId, ...fromCache }
+            }));
+        }
+
+        // Determine which PRs need fetching (not already in state or cache)
+        const toFetch = pullRequests.filter(pr =>
+            !Object.prototype.hasOwnProperty.call(this.state.buildPolicyEvaluationsByPRId, pr.pullRequestId) &&
+            !Object.prototype.hasOwnProperty.call(buildPolicyEvaluationsCache, pr.pullRequestId)
+        );
+
+        if (toFetch.length > 0) {
+            // Fire and forget; do not block UI
+            this.fetchBuildPolicyEvaluationsForPRs(toFetch);
+        }
+    }
+
+    private async fetchBuildPolicyEvaluationsForPRs(pullRequests: GitPullRequest[]) {
+        const policyRestClient: PolicyRestClient = getClient(PolicyRestClient);
+        const maxConcurrency = 6; // Avoid overloading the API/browser
+        let index = 0;
+
+        const worker = async () => {
+            let localBatch: Dictionary<PolicyEvaluationRecord[]> = {};
+            const batchSize = 10;
+            while (true) {
+                const i = index++;
+                if (i >= pullRequests.length) {
+                    break;
+                }
+                const pr = pullRequests[i];
+
+                // Skip if already cached (race-safe check)
+                if (Object.prototype.hasOwnProperty.call(buildPolicyEvaluationsCache, pr.pullRequestId)) {
+                    localBatch[pr.pullRequestId] = buildPolicyEvaluationsCache[pr.pullRequestId];
+                } else {
+                    try {
+                        const artifactId = `vstfs:///CodeReview/CodeReviewId/${pr.repository.project.id}/${pr.pullRequestId}`;
+                        const evaluations = await policyRestClient.getPolicyEvaluations(pr.repository.project.id, artifactId);
+                        const buildEvaluations = evaluations?.filter(x =>
+                            x.configuration?.type?.id === Constants.BuildPolicyTypeId &&
+                            x.configuration.isEnabled &&
+                            !x.configuration.isDeleted &&
+                            x.status !== PolicyEvaluationStatus.NotApplicable) ?? [];
+                        buildPolicyEvaluationsCache[pr.pullRequestId] = buildEvaluations;
+                        localBatch[pr.pullRequestId] = buildEvaluations;
+                    } catch (e) {
+                        // On error, store empty to avoid blocking UI
+                        buildPolicyEvaluationsCache[pr.pullRequestId] = [];
+                        localBatch[pr.pullRequestId] = [];
+                    }
+                }
+
+                if (Object.keys(localBatch).length >= batchSize) {
+                    const toApply = localBatch;
+                    localBatch = {};
+                    if (this._isMounted) {
+                        this.setState(prev => ({
+                            buildPolicyEvaluationsByPRId: { ...prev.buildPolicyEvaluationsByPRId, ...toApply }
+                        }));
+                    }
+                }
+            }
+
+            // Flush any remaining items in this worker's batch
+            if (Object.keys(localBatch).length > 0) {
+                const toApply = localBatch;
+                if (this._isMounted) {
+                    this.setState(prev => ({
+                        buildPolicyEvaluationsByPRId: { ...prev.buildPolicyEvaluationsByPRId, ...toApply }
+                    }));
+                }
+            }
+        };
+
+        await Promise.all(new Array(maxConcurrency).fill(0).map(() => worker()));
+    }
+
     private getPRUrl(projectName: string, repositoryName: string, pullRequestId): string {
         return this.props.baseUrl + encodeURIComponent(projectName) + '/_git/' + encodeURIComponent(repositoryName) + '/pullRequest/' + pullRequestId;
     }
@@ -660,6 +811,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
         // Ensure we load threads for the currently visible PRs only
         this.ensureThreadsLoadedForPRs(filteredPullRequests);
+
+        // Ensure we load build validation statuses for the currently visible PRs only
+        this.ensureBuildStatusesLoadedForPRs(filteredPullRequests);
     };
 
     private filterItems = (
@@ -983,6 +1137,48 @@ function getPullRequestStatusIndicatorData(status: PullRequestAsyncStatus): ISta
     }
 
     return { statusProps: Statuses.Queued, label: "Unknown" }
+}
+
+function getBuildStatusIndicatorData(evaluations: PolicyEvaluationRecord[]): IStatusIndicatorData {
+    // Aggregate multiple build validation policies into a single status:
+    // any failure wins, then in-progress states, then success when all approved.
+    if (evaluations.some(x => x.status === PolicyEvaluationStatus.Rejected || x.status === PolicyEvaluationStatus.Broken)) {
+        return { statusProps: Statuses.Failed, label: "Failed" }
+    }
+    if (evaluations.some(x => x.status === PolicyEvaluationStatus.Running)) {
+        return { statusProps: Statuses.Running, label: "Running" }
+    }
+    if (evaluations.some(x => x.status === PolicyEvaluationStatus.Queued)) {
+        return { statusProps: Statuses.Queued, label: "Queued" }
+    }
+    if (evaluations.every(x => x.status === PolicyEvaluationStatus.Approved)) {
+        return { statusProps: Statuses.Success, label: "Succeeded" }
+    }
+
+    return { statusProps: Statuses.Queued, label: "Unknown" }
+}
+
+function getBuildStatusLabel(status: PolicyEvaluationStatus): string {
+    switch (status) {
+        case PolicyEvaluationStatus.Queued:
+            return "queued";
+        case PolicyEvaluationStatus.Running:
+            return "running";
+        case PolicyEvaluationStatus.Approved:
+            return "succeeded";
+        case PolicyEvaluationStatus.Rejected:
+            return "failed";
+        case PolicyEvaluationStatus.Broken:
+            return "broken";
+    }
+
+    return "unknown";
+}
+
+function getBuildStatusTooltipText(evaluations: PolicyEvaluationRecord[]): string {
+    return evaluations
+        .map(x => `${x.configuration?.settings?.displayName || "Build validation"}: ${getBuildStatusLabel(x.status)}`)
+        .join(", ");
 }
 
 function getVoteStatusIndicatorData(vote: number): IStatusIndicatorData {
