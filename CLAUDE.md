@@ -17,9 +17,13 @@ npm run build                      # production bundle + .vsix package (bumps ma
 npm run build:dev                  # development bundle + .vsix package
 npm run publish-extension-dev      # publish private dev extension (configs/dev.json)
 npm run publish-extension-release  # publish public extension (configs/release.json)
+npm run lint                       # ESLint (eslint.config.mjs)
+npm test                           # Jest
+npx jest -t "Draft only"           # run one test by name
+npx tsc --noEmit --skipLibCheck    # type check (azure-devops-ui typings fail without skipLibCheck)
 ```
 
-The project has no test suite and no linter. To check types, run `npx tsc --noEmit`.
+Jest runs `*.test.ts` files through ts-jest. `jest.config.js` overrides the module format to CommonJS, because `tsconfig.json` targets AMD for webpack. Put testable logic in pure modules such as `pull-request-utils.ts`. Do not test the React components directly, because they need the Azure DevOps host SDK.
 
 The `postbuild` step runs `tfx extension create --rev-version`, which increments the `version` in `azure-devops-extension.json`. Do not edit that version by hand.
 
@@ -36,7 +40,7 @@ The dev extension (`configs/dev.json`) sets `baseUri` to `https://127.0.0.1:3000
 The app has two components that share one `Filter` object from `azure-devops-ui`:
 
 - `ActivePullRequests.tsx` is the page shell. It loads the repositories and builds the `FilterBar` with four dropdowns: Repositories, Created By, Reviewers, and Other (Published/Draft). It also restores persisted filter selections.
-- `PullRequestsListingPageContent.tsx` fetches the active pull requests with `getPullRequestsByProject` (`top = 0` means no 100-item limit). It subscribes to the shared filter, filters and sorts the table, and loads comment threads and avatars for visible rows only. It sends the creator and reviewer lists up to the shell through the `updateUsers` callback.
+- `PullRequestsListingPageContent.tsx` fetches the active pull requests with `getPullRequestsByProject` (`top = 0` means no 100-item limit). The pure function `filterPullRequests` in `pull-request-utils.ts` does the filtering. The component subscribes to the shared filter, sorts the table, and loads comment threads and avatars for visible rows only. It sends the creator and reviewer lists up to the shell through the `updateUsers` callback.
 
 Filter persistence uses the extension data service with `scopeType: "User"`. The keys are in `Constants.tsx`. `onFilterChanged` in the listing component saves each filter state. The shell restores the states on load. Persisted values contain full `GitRepository` or identity objects. Restore code must map them by `id` to the current objects, because the dropdown clears a selection that does not match by reference. If no saved value exists, the Other filter defaults to Published.
 

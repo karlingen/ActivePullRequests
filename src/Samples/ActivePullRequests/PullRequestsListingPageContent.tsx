@@ -5,7 +5,6 @@ import { IFilter, FILTER_CHANGE_EVENT } from "azure-devops-ui/Utilities/Filter";
 import {
     GitPullRequest,
     GitPullRequestCommentThread,
-    GitRepository,
     GitRestClient,
     PullRequestAsyncStatus,
     PullRequestStatus,
@@ -37,6 +36,7 @@ import {
     sortItems
 } from "azure-devops-ui/Table";
 import Constants from "./Constants";
+import { extractDescriptorFromAvatarUrl, extractOrganization, filterPullRequests } from "./pull-request-utils";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
 import { AgoFormat } from "azure-devops-ui/Utilities/Date";
 
@@ -629,12 +629,12 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         const reviewersState = this.props.filter.getFilterItemState(Constants.ReviewersFilterKey);
         const otherState = this.props.filter.getFilterItemState(Constants.OtherFilterKey);
         
-        const selectedRepositories: GitRepository[] = repositoriesState?.value;
-        const selectedCreators: IdentityRefWithVote[] = creatorsState?.value;
-        const selectedReviewers: IdentityRefWithVote[] = reviewersState?.value;
-        const otherFilter: any[] = otherState?.value;
-        
-        const filteredPullRequests = this.filterItems(selectedRepositories, selectedCreators, selectedReviewers, otherFilter);
+        const filteredPullRequests = filterPullRequests(this.state.allPullRequests, {
+            repositories: repositoriesState?.value,
+            creators: creatorsState?.value,
+            reviewers: reviewersState?.value,
+            other: otherState?.value
+        });
 
         this.setState({
             filtering: this.props.filter.hasChangesToReset(),
@@ -660,62 +660,6 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
         // Ensure we load threads for the currently visible PRs only
         this.ensureThreadsLoadedForPRs(filteredPullRequests);
-    };
-
-    private filterItems = (
-        selectedRepositories: GitRepository[],
-        selectedCreators?: IdentityRefWithVote[],
-        selectedReviewers?: IdentityRefWithVote[],
-        otherFilter?: any[]
-    ): GitPullRequest[] => {
-        let filteredItems = [...this.state.allPullRequests];
-
-        // Filter by repositories (if any are selected)
-        if (selectedRepositories && selectedRepositories.length > 0) {
-            const repositoryIds = selectedRepositories.filter(x => x !== null && x !== undefined).map(x => x.id);
-            if (repositoryIds.length > 0) {
-                filteredItems = filteredItems.filter(item => {
-                    return repositoryIds.some(repositoryId => repositoryId == item.repository.id);
-                });
-            }
-        }
-
-        // Filter by creators (if any are selected)
-        if (selectedCreators && selectedCreators.length > 0) {
-            const creatorIds = selectedCreators.filter(x => x !== null && x !== undefined).map(x => x.id);
-            if (creatorIds.length > 0) {
-                filteredItems = filteredItems.filter(item => {
-                    return creatorIds.some(creatorId => creatorId === item.createdBy.id);
-                });
-            }
-        }
-
-        // Filter by reviewers (if any are selected)
-        if (selectedReviewers && selectedReviewers.length > 0) {
-            const reviewerIds = selectedReviewers.filter(x => x !== null && x !== undefined).map(x => x.id);
-            if (reviewerIds.length > 0) {
-                filteredItems = filteredItems.filter(item => {
-                    return item.reviewers.some(reviewer => reviewerIds.includes(reviewer.id));
-                });
-            }
-        }
-
-        // Filter by other criteria (Published / Draft toggles)
-        if (otherFilter && otherFilter.length > 0) {
-            const showPublished = otherFilter.includes(Constants.IsPublishedKey);
-            const showDraft = otherFilter.includes(Constants.IsDraftKey);
-
-            if (showPublished && !showDraft) {
-                filteredItems = filteredItems.filter(item => !item.isDraft);
-            } else if (showDraft && !showPublished) {
-                filteredItems = filteredItems.filter(item => item.isDraft === true);
-            }
-            // If both are selected, show everything (no filtering needed)
-        } else {
-            // Nothing selected in Other filter — show everything
-        }
-
-        return filteredItems;
     };
 
     private sortFunctions = [
@@ -807,23 +751,6 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
     }
 
     /**
-     * Extracts organization name from the base URL
-     */
-    private extractOrganization(baseUrl: string): string | undefined {
-        const orgMatch = baseUrl.match(/\/\/[^/]+\/([^/]+)\//);
-        return orgMatch ? orgMatch[1] : undefined;
-    }
-
-    /**
-     * Extracts descriptor from GraphProfile/MemberAvatars URL
-     * E.g., from "https://dev.azure.com/org/_apis/GraphProfile/MemberAvatars/aad.XXX" returns "aad.XXX"
-     */
-    private extractDescriptorFromAvatarUrl(avatarUrl: string): string | undefined {
-        const match = avatarUrl.match(/\/MemberAvatars\/([^/?]+)/);
-        return match ? match[1] : undefined;
-    }
-
-    /**
      * Fetches avatar from Graph API and converts base64 data to data URL
      * Results are cached to avoid redundant API calls
      */
@@ -838,7 +765,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         }
 
         try {
-            const organization = this.extractOrganization(this.props.baseUrl);
+            const organization = extractOrganization(this.props.baseUrl);
             if (!organization) {
                 return undefined;
             }
@@ -894,7 +821,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                     }
                     // If no direct descriptor, try extracting from _links.avatar.href
                     else if (reviewer._links?.avatar?.href) {
-                        const descriptor = this.extractDescriptorFromAvatarUrl(reviewer._links.avatar.href);
+                        const descriptor = extractDescriptorFromAvatarUrl(reviewer._links.avatar.href);
                         if (descriptor) {
                             identities.push({ descriptor });
                         }
@@ -955,7 +882,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
         // Try to get descriptor from identity or extract from _links.avatar.href
         let descriptor = identity.descriptor;
         if (!descriptor && identity._links?.avatar?.href) {
-            descriptor = this.extractDescriptorFromAvatarUrl(identity._links.avatar.href);
+            descriptor = extractDescriptorFromAvatarUrl(identity._links.avatar.href);
         }
         
         // Use cached data URL if available (fetched from Graph API)
