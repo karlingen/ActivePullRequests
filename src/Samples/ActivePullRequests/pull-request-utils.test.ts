@@ -1,7 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
 import type { GitPullRequest, GitRepository, IdentityRefWithVote } from "azure-devops-extension-api/Git";
 import Constants from "./Constants";
-import { extractDescriptorFromAvatarUrl, extractOrganization, filterPullRequests } from "./pull-request-utils";
+import { extractDescriptorFromAvatarUrl, extractOrganization, filterPullRequests, formatAge } from "./pull-request-utils";
 
 function makePullRequest(id: number, repoId: string, creatorId: string, reviewerIds: string[], isDraft: boolean): GitPullRequest {
     return {
@@ -78,5 +78,18 @@ describe("URL helpers", () => {
 
         expect(extractDescriptorFromAvatarUrl(url)).toBe("aad.XXX");
         expect(extractDescriptorFromAvatarUrl("https://example.com/avatar.png")).toBeUndefined();
+    });
+});
+
+describe("formatAge", () => {
+    const now = new Date("2026-10-12T12:00:00Z");
+
+    test("splits the difference into days, hours, and minutes", () => {
+        expect(formatAge(new Date("2025-11-06T12:26:00Z"), now)).toBe("339d 23h 34m");
+    });
+
+    test("shows zeros for a pull request created now or in the future", () => {
+        expect(formatAge(now, now)).toBe("0d 0h 0m");
+        expect(formatAge(new Date("2026-10-13T00:00:00Z"), now)).toBe("0d 0h 0m");
     });
 });
