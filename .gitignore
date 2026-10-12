@@ -12,3 +12,6 @@ coverage
 
 # Mac
 .DS_Store
+
+# Playwright login state (full Azure DevOps session, never commit)
+.auth/
