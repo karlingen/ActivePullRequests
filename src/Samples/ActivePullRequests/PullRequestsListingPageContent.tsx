@@ -1,7 +1,7 @@
 import React from "react";
 import * as SDK from "azure-devops-extension-sdk";
 import { ObservableValue } from "azure-devops-ui/Core/Observable";
-import { IFilter, FILTER_CHANGE_EVENT, IFilterState } from "azure-devops-ui/Utilities/Filter";
+import { IFilter, FILTER_CHANGE_EVENT } from "azure-devops-ui/Utilities/Filter";
 import {
     GitPullRequest,
     GitPullRequestCommentThread,
@@ -18,7 +18,7 @@ import { Status, Statuses, StatusSize, IStatusProps } from "azure-devops-ui/Stat
 import { Tooltip } from "azure-devops-ui/TooltipEx";
 import { ArrayItemProvider } from "azure-devops-ui/Utilities/Provider";
 import { Ago } from "azure-devops-ui/Ago";
-import { Icon, IconSize, IIconProps } from "azure-devops-ui/Icon";
+import { Icon, IIconProps } from "azure-devops-ui/Icon";
 import { css } from "azure-devops-ui/Util";
 import { Link } from "azure-devops-ui/Link";
 import { Pill, PillSize, PillVariant } from "azure-devops-ui/Pill";
@@ -117,13 +117,13 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             return;
         }
 
-        let creationDateStart = new Date();
+        const creationDateStart = new Date();
         creationDateStart.setFullYear(creationDateStart.getFullYear() - 10);
 
-        let creationDateEnd = new Date();
+        const creationDateEnd = new Date();
         creationDateEnd.setFullYear(creationDateEnd.getFullYear() + 1);
 
-        let pullRequests = await gitRestClient.getPullRequestsByProject(
+        const pullRequests = await gitRestClient.getPullRequestsByProject(
             currentProject.id,
             {
                 creatorId: this.props.showOnlyCurrentUser ? currentUser.id : "",
@@ -300,9 +300,9 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 tableItem: GitPullRequest
             ): JSX.Element => {
 
-                let sourceBranchName = tableItem.sourceRefName.split('/').pop();
-                let targetBranchName = tableItem.targetRefName.split('/').pop();
-                let currentUserIsRequiredReviewer = tableItem.reviewers.some(reviewer => reviewer.isRequired && reviewer.id == this.state.currentUserId);
+                const sourceBranchName = tableItem.sourceRefName.split('/').pop();
+                const targetBranchName = tableItem.targetRefName.split('/').pop();
+                const currentUserIsRequiredReviewer = tableItem.reviewers.some(reviewer => reviewer.isRequired && reviewer.id == this.state.currentUserId);
 
                 return (
                     <TwoLineTableCell
@@ -477,7 +477,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         key={"col-" + columnIndex}
                         contentClassName="fontSizeM font-size-m scroll-hidden flex-wrap">
                         {tableItem.reviewers.map((reviewer) => {
-                            let statusIndicatorData = getVoteStatusIndicatorData(reviewer.vote);
+                            const statusIndicatorData = getVoteStatusIndicatorData(reviewer.vote);
                             return <React.Fragment key={reviewer.id}>
                                 <Tooltip overflowOnly={false} text={reviewer.displayName}>
                                     <div className={"flex-column margin-right-4 relative"}>
@@ -810,7 +810,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
      * Extracts organization name from the base URL
      */
     private extractOrganization(baseUrl: string): string | undefined {
-        const orgMatch = baseUrl.match(/\/\/[^\/]+\/([^\/]+)\//);
+        const orgMatch = baseUrl.match(/\/\/[^/]+\/([^/]+)\//);
         return orgMatch ? orgMatch[1] : undefined;
     }
 
@@ -819,7 +819,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
      * E.g., from "https://dev.azure.com/org/_apis/GraphProfile/MemberAvatars/aad.XXX" returns "aad.XXX"
      */
     private extractDescriptorFromAvatarUrl(avatarUrl: string): string | undefined {
-        const match = avatarUrl.match(/\/MemberAvatars\/([^\/\?]+)/);
+        const match = avatarUrl.match(/\/MemberAvatars\/([^/?]+)/);
         return match ? match[1] : undefined;
     }
 
@@ -997,7 +997,7 @@ function getVoteStatusIndicatorData(vote: number): IStatusIndicatorData {
     } else if (vote === 5) {
         return { statusProps: Statuses.Success, label: "Approved with suggestions" }
     } else if (vote === -5) {
-        let waitingStatus = Statuses.Waiting;
+        const waitingStatus = Statuses.Waiting;
         waitingStatus.color = "warning"
         return { statusProps: waitingStatus, label: "Waiting for author" }
     } else if (vote === -10) {

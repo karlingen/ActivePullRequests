@@ -22,7 +22,7 @@ import Constants from "./Constants";
 interface IActivePullRequestsContentState {
     baseUrl: string | undefined;
     allRepositories: GitRepository[];
-    title: String;
+    title: string;
     repoDropdownItems: IListBoxItem[];
     createdByDropdownItems: IListBoxItem[];
     reviewersDropdownItems: IListBoxItem[];
@@ -276,7 +276,7 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         this._repoItemsLoaded = true;
         this._waitingForRepoItems = false;
 
-        let items: IListBoxItem[] = [
+        const items: IListBoxItem[] = [
             { id: "repo-header", text: "", type: ListBoxItemType.Header },
             ...repositories.map(repo => ({ id: `repo-${repo.id}`, text: repo.name, data: repo, type: ListBoxItemType.Row }))
         ];
@@ -297,7 +297,6 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
         const persistedState: IFilterItemState | null = await dataManager.getValue(Constants.UserRepositoriesKey, { scopeType: "User" });
 
         // Normalize persisted repo references to the current GitRepository objects
-        let normalizedSelectedRepositoryIds = new Set<string>();
         let normalizedState: IFilterItemState | null = null;
         if (persistedState) {
             const persistedRepositories: GitRepository[] | undefined = (persistedState as any)?.value;
@@ -312,7 +311,6 @@ class ActivePullRequestsContent extends React.Component<{}, IActivePullRequestsC
                 .map(id => repositoryById[id])
                 .filter((repo): repo is GitRepository => !!repo);
 
-            normalizedSelectedRepositoryIds = new Set<string>(normalizedRepositories.map(repo => repo.id));
             normalizedState = { ...(persistedState as any), value: normalizedRepositories } as IFilterItemState;
 
             // Update filter with normalized value so DropdownFilterBarItem won't clear selection on open
