@@ -67,3 +67,19 @@ export function extractDescriptorFromAvatarUrl(avatarUrl: string): string | unde
 
     return match ? match[1] : undefined;
 }
+
+const MINUTE_MS = 60 * 1000,
+      HOUR_MS = 60 * MINUTE_MS,
+      DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Formats the time between two dates as "12d 3h 45m"
+ */
+export function formatAge(from: Date, now: Date): string {
+    const diff = Math.max(0, now.getTime() - from.getTime()),
+          days = Math.floor(diff / DAY_MS),
+          hours = Math.floor((diff % DAY_MS) / HOUR_MS),
+          minutes = Math.floor((diff % HOUR_MS) / MINUTE_MS);
+
+    return `${days}d ${hours}h ${minutes}m`;
+}

@@ -36,7 +36,7 @@ import {
     sortItems
 } from "azure-devops-ui/Table";
 import Constants from "./Constants";
-import { extractDescriptorFromAvatarUrl, extractOrganization, filterPullRequests } from "./pull-request-utils";
+import { extractDescriptorFromAvatarUrl, extractOrganization, filterPullRequests, formatAge } from "./pull-request-utils";
 import { CommonServiceIds, getClient, IExtensionDataManager, IExtensionDataService, IHostNavigationService, IProjectPageService } from "azure-devops-extension-api";
 import { AgoFormat } from "azure-devops-ui/Utilities/Date";
 
@@ -380,7 +380,11 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                                 <Ago date={tableItem.creationDate} format={AgoFormat.Extended} />
                             ),
                         })}
-                        line2={null} />
+                        line2={WithIcon({
+                            className: "fontSize font-size secondary-text",
+                            iconProps: { iconName: "Clock" },
+                            children: formatAge(tableItem.creationDate, new Date()),
+                        })} />
                 );
             },
             sortProps: {
