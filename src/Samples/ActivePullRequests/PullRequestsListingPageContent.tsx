@@ -1,6 +1,6 @@
 import React from "react";
 import * as SDK from "azure-devops-extension-sdk";
-import { ObservableValue } from "azure-devops-ui/Core/Observable";
+import { ObservableLike, ObservableValue } from "azure-devops-ui/Core/Observable";
 import { IFilter, FILTER_CHANGE_EVENT } from "azure-devops-ui/Utilities/Filter";
 import {
     GitPullRequest,
@@ -27,6 +27,7 @@ import { Spinner, SpinnerSize } from "azure-devops-ui/Spinner";
 import "./PullRequestsListingPageContent.scss";
 
 import {
+    ITableBreakpoint,
     ITableColumn,
     SimpleTableCell,
     Table,
@@ -44,6 +45,12 @@ import { AgoFormat } from "azure-devops-ui/Utilities/Date";
 const VSSPS_BASE_URL = "https://vssps.dev.azure.com";
 const GRAPH_API_VERSION = "7.1";
 const GRAPH_AVATAR_PATH = "_apis/graph/Subjects";
+
+// Fixed width so the PR number is never cut, also on narrow tables
+const PR_ID_COLUMN_WIDTH = 70;
+
+// Long repository names in the title cell are cut, so the branches and age stay visible
+const REPOSITORY_NAME_MAX_WIDTH = 120;
 
 interface IPullRequestsListingPageContentProps {
     filter: IFilter;
@@ -211,6 +218,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                     behaviors={[this.sortingBehavior]}
                     selectableText={true}
                     columns={this.columns}
+                    tableBreakpoints={this.tableBreakpoints}
                     itemProvider={new ArrayItemProvider<GitPullRequest>(this.state.filteredItems)}
                     onActivate={(event, data) => {
                         const innerData = data.data;
@@ -233,7 +241,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 ariaLabelAscending: "Sorted Ascending",
                 ariaLabelDescending: "Sorted Descending"
             },
-            width: new ObservableValue(-15)
+            width: new ObservableValue(PR_ID_COLUMN_WIDTH)
         },
         {
             id: "createdBy",
@@ -312,6 +320,12 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         tableColumn={tableColumn}
                         line1={
                             <div className="scroll-hidden rhythm-horizontal-4 flex-row">
+                                {this.isColumnHidden("mergeStatus") &&
+                                    <Status
+                                        {...getPullRequestStatusIndicatorData(tableItem.mergeStatus).statusProps}
+                                        className="flex-noshrink"
+                                        size={StatusSize.s}
+                                    />}
                                 <Tooltip overflowOnly={true} className="flex-row">
                                     <span className={"white-space-normal"}>{tableItem.title}</span>
                                 </Tooltip>
@@ -326,6 +340,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         }
                         line2={
                             <span className="fontSize font-size secondary-text flex-row flex-center text-ellipsis">
+                                {this.isColumnHidden("repository") && this.renderHiddenColumnDetails(tableItem)}
                                 <Tooltip text={sourceBranchName + " into " + targetBranchName} overflowOnly>
                                     <span className="text-ellipsis" style={{ flexShrink: 10 }}>
                                         <span className="monospaced-xs bolt-table-link bolt-table-inline-link text-ellipsis">
@@ -433,23 +448,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                 tableItem: GitPullRequest
             ): JSX.Element => {
 
-                const hasThreads = Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, tableItem.pullRequestId);
-                const threads = hasThreads ? this.state.commentThreadsByPRId[tableItem.pullRequestId] : [];
-                const total: number = threads.length;
-                const resolved: number = threads.filter(x => x.status != CommentThreadStatus.Active).length
-                const unresolved = total - resolved;
-
-                let tooltipText = "";
-                if (!hasThreads) {
-                    tooltipText = "Loading comments";
-                } else {
-                    tooltipText = `${unresolved} unresolved ${unresolved == 1 ? "comment" : "comments"}`;
-                    if (total == resolved) {
-                        tooltipText = "No unresolved comments"
-                    }
-                }
-
-                const displayText = !hasThreads ? "…" : (total == 0 ? "" : `${resolved}/${total}`);
+                const { className, displayText, tooltipText } = this.getCommentSummary(tableItem);
 
                 return (
                     <SimpleTableCell
@@ -458,7 +457,7 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
                         key={"col-" + columnIndex}
                         contentClassName="fontSizeM font-size-m scroll-hidden justify-center">
                         <Tooltip text={tooltipText}>
-                            <span className={!hasThreads ? "" : (resolved == total ? "has-only-resolved-comments" : "has-unresolved-comments")}>{displayText}</span>
+                            <span className={className}>{displayText}</span>
                         </Tooltip>
                     </SimpleTableCell>
                 );
@@ -500,6 +499,17 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
             },
             width: new ObservableValue(-40)
         }
+    ];
+
+    // Column widths per table width, in the order of this.columns. 0 hides the column.
+    // The first breakpoint must be above 0, because a 0 gives the IntersectionObserver in
+    // Breakpoint a negative threshold. Narrower tables still use the first entry.
+    private tableBreakpoints: ITableBreakpoint[] = [
+        // Phone: #, Title, Reviewers
+        { breakpoint: 1, columnWidths: [PR_ID_COLUMN_WIDTH, 0, 0, -100, 0, 0, 0, -40] },
+        // Tablet: #, By, Title, Merge Status, Reviewers
+        { breakpoint: 600, columnWidths: [PR_ID_COLUMN_WIDTH, -20, 0, -100, 0, 120, 0, -40] },
+        { breakpoint: 1100, columnWidths: [PR_ID_COLUMN_WIDTH, -20, -30, -100, -50, -30, -25, -40] }
     ];
 
     private async ensureThreadsLoadedForPRs(pullRequests: GitPullRequest[]) {
@@ -591,6 +601,63 @@ class PullRequestsListingPageContent extends React.Component<IPullRequestsListin
 
     private getPRUrl(projectName: string, repositoryName: string, pullRequestId): string {
         return this.props.baseUrl + encodeURIComponent(projectName) + '/_git/' + encodeURIComponent(repositoryName) + '/pullRequest/' + pullRequestId;
+    }
+
+    /**
+     * Returns true when the current table breakpoint hides the column.
+     */
+    private isColumnHidden(columnId: string): boolean {
+        const column = this.columns.find((col) => { return col.id === columnId; });
+
+        return !!column && ObservableLike.getValue(column.width) === 0;
+    }
+
+    /**
+     * Shows the creator, repository, age, and comments in the title cell, for
+     * narrow tables that hide those columns.
+     */
+    private renderHiddenColumnDetails(tableItem: GitPullRequest): JSX.Element {
+        const comments = this.getCommentSummary(tableItem);
+
+        return (
+            <span className="flex-row flex-center flex-noshrink rhythm-horizontal-8 margin-right-8">
+                {this.isColumnHidden("createdBy") &&
+                    <VssPersona className="flex-noshrink" imageUrl={this.getAvatarUrl(tableItem.createdBy)} displayName={tableItem.createdBy.displayName} size="extra-small" />}
+                <span className="text-ellipsis" style={{ maxWidth: REPOSITORY_NAME_MAX_WIDTH }}>{tableItem.repository.name}</span>
+                <Tooltip text={tableItem.creationDate.toLocaleString()}>
+                    {WithIcon({ className: "flex-noshrink", iconProps: { iconName: "Clock" }, children: formatAge(tableItem.creationDate, new Date()) })}
+                </Tooltip>
+                {comments.displayText &&
+                    <Tooltip text={comments.tooltipText}>
+                        <span className="flex-row flex-center flex-noshrink">
+                            {Icon({ className: "icon-margin", iconName: "Comment" })}
+                            <span className={comments.className}>{comments.displayText}</span>
+                        </span>
+                    </Tooltip>}
+            </span>
+        );
+    }
+
+    /**
+     * Counts the resolved comment threads of a pull request for display.
+     */
+    private getCommentSummary(tableItem: GitPullRequest): { className: string; displayText: string; tooltipText: string } {
+        const hasThreads = Object.prototype.hasOwnProperty.call(this.state.commentThreadsByPRId, tableItem.pullRequestId);
+
+        if (!hasThreads) {
+            return { className: "", displayText: "…", tooltipText: "Loading comments" };
+        }
+
+        const threads = this.state.commentThreadsByPRId[tableItem.pullRequestId],
+              total = threads.length,
+              resolved = threads.filter((x) => { return x.status != CommentThreadStatus.Active; }).length,
+              unresolved = total - resolved;
+
+        return {
+            className: resolved == total ? "has-only-resolved-comments" : "has-unresolved-comments",
+            displayText: total == 0 ? "" : `${resolved}/${total}`,
+            tooltipText: total == resolved ? "No unresolved comments" : `${unresolved} unresolved ${unresolved == 1 ? "comment" : "comments"}`,
+        };
     }
 
     private getIDRenderCell(): (rowIndex: number, columnIndex: number, tableColumn: ITableColumn<GitPullRequest>, tableItem: GitPullRequest, ariaRowIndex?: number | undefined) => JSX.Element {
