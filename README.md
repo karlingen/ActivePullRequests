@@ -33,4 +33,11 @@ This project welcomes contributions and suggestions. Please see [CONTRIBUTING.md
 
 ## Blank page in development
 
-Visit https://0.0.0.0:3000 in your browser and bypass the certficate issue and then reload the extension page.
+Create a trusted local certificate once with [mkcert](https://github.com/FiloSottile/mkcert). The dev server uses it when `.certs/localhost.pem` exists:
+
+```sh
+brew install mkcert && mkcert -install
+mkdir -p .certs && mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem 127.0.0.1 localhost 0.0.0.0
+```
+
+Without this certificate, visit https://127.0.0.1:3000 in your browser, accept the certificate, and then reload the extension page.

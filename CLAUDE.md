@@ -29,7 +29,14 @@ The `postbuild` step runs `tfx extension create --rev-version`, which increments
 
 ## Local development
 
-The dev extension (`configs/dev.json`) sets `baseUri` to `https://127.0.0.1:3000`. Azure DevOps then loads the bundle from your local dev server instead of the packaged `dist`. If the page is blank, open `https://0.0.0.0:3000` in the browser, accept the self-signed certificate, and reload the extension page.
+The dev extension (`configs/dev.json`) sets `baseUri` to `https://127.0.0.1:3000`. Azure DevOps then loads the bundle from your local dev server instead of the packaged `dist`. To stop the browser from blocking the dev server certificate, create a trusted local certificate once with [mkcert](https://github.com/FiloSottile/mkcert). `webpack.config.js` uses it when `.certs/localhost.pem` exists:
+
+```sh
+brew install mkcert && mkcert -install
+mkdir -p .certs && mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem 127.0.0.1 localhost 0.0.0.0
+```
+
+Without this certificate, the dev server uses a self-signed one. If the page is blank, open `https://127.0.0.1:3000` in the browser, accept the certificate, and reload the extension page.
 
 ## Architecture
 
