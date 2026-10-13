@@ -15,3 +15,6 @@ coverage
 
 # Playwright login state (full Azure DevOps session, never commit)
 .auth/
+
+# Local mkcert certificate for the dev server
+.certs/

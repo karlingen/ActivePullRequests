@@ -2,6 +2,12 @@ const path = require("path");
 const fs = require("fs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 
+// Trusted local certificate from mkcert (see CLAUDE.md). Without it, the dev server uses a
+// self-signed certificate that the browser must accept by hand.
+const certFile = path.join(__dirname, ".certs/localhost.pem"),
+      keyFile = path.join(__dirname, ".certs/localhost-key.pem"),
+      httpsOptions = fs.existsSync(certFile) ? { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) } : true;
+
 // Webpack entry points. Mapping from resulting bundle name to the source file entry.
 const entries = {};
 
@@ -64,7 +70,7 @@ module.exports = {
 
     devtool: "inline-source-map",
     devServer: {
-        https: true,
+        https: httpsOptions,
         port: 3000,
         headers: {
             "Access-Control-Allow-Origin": "*",
