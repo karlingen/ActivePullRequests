@@ -15,4 +15,7 @@ export default class Constants {
     // Filter values
     public static readonly IsDraftKey = "isDraft";
     public static readonly IsPublishedKey = "isPublished";
+
+    // Policy configuration type id for "Build" (build validation) policies
+    public static readonly BuildPolicyTypeId = "0609b952-1397-4640-95ec-e00a01b2c241";
 }

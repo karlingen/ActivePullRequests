@@ -1,6 +1,8 @@
 # Active Pull Requests
 A VSTS extension for showing a list of all active pull requests for chosen projects with features such as sorting, filtering, and much more.
 
+Each pull request row shows a `Build` column with the status of the build validation (branch policy) pipelines for that pull request: succeeded, failed, running or queued. Hover over the icon for a per-pipeline breakdown. The column is empty when no build validation policy applies to the pull request.
+
 ![alt text](images/screenshot.png)
 
 After installing, open an Azure DevOps project and go to `Repos` -> `Active Pull Requests`.
